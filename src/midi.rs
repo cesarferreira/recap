@@ -150,21 +150,32 @@ pub fn play_midi(midi_data: &Smf) -> Result<(), Box<dyn std::error::Error>> {
     let (_stream, stream_handle) = OutputStream::try_default()?;
     let sink = Sink::try_new(&stream_handle)?;
 
-    // Extract notes from MIDI data
+    // Create a temporary file with .mid extension
+    let temp_file = NamedTempFile::new()?.into_temp_path();
+    let temp_path = temp_file.with_extension("mid");
+    let mut file = File::create(&temp_path)?;
+    midi_data.write_std(&mut file)?;
+
+    // Save the file for external playback
+    println!("\n🎵 MIDI file saved temporarily. For better playback, use an external MIDI player.");
+    println!("File location: {}", temp_path.display());
+
+    // Basic audio preview
     for event in midi_data.tracks[0].iter() {
         if let TrackEventKind::Midi { message, channel } = event.kind {
             if let MidiMessage::NoteOn { key, vel } = message {
                 if vel.as_int() > 0 {
-                    // Convert MIDI note to frequency (A4 = 69 = 440Hz)
+                    // Convert MIDI note to frequency
                     let freq = 440.0 * 2.0f32.powf((key.as_int() as f32 - 69.0) / 12.0);
                     
-                    // Create a sine wave for this note
+                    // Create a short preview tone
                     let source = SineWave::new(freq)
-                        .fade_in(Duration::from_millis(10))
-                        .amplify(0.20);
+                        .amplify(0.15)
+                        .take_duration(Duration::from_millis(100))
+                        .fade_in(Duration::from_millis(10));
                     
                     sink.append(source);
-                    std::thread::sleep(Duration::from_millis(200));
+                    std::thread::sleep(Duration::from_millis(150));
                 }
             }
         }
