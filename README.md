@@ -1,4 +1,4 @@
-# 📊 Recap
+# Recap
 
 > A beautiful Git commit history viewer with stats and colorful output
 
