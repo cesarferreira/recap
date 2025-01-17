@@ -326,5 +326,6 @@ fn main() {
 
     println!();
     println!("{}", "====================== STATS ======================".bold());
+    println!();
     println!("{table}");
 }
