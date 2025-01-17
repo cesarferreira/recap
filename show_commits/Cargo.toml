@@ -1,0 +1,8 @@
+[package]
+name = "show_commits"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+clap = "4.3.5"    # (or the latest)
+
