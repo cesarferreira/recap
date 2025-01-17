@@ -46,6 +46,14 @@ fn main() {
                 .default_value("24 hours ago")
                 .required(false),
         )
+        .arg(
+            Arg::new("show_diff")
+                .long("show-diff")
+                .short('d')
+                .help("Show the diff for each commit")
+                .action(clap::ArgAction::SetTrue)
+                .required(false),
+        )
         .get_matches();
 
     // 2. Extract arguments (or use defaults)
@@ -162,6 +170,13 @@ fn main() {
     // ---------------------------------------------------------------------
     // PART A: Print each commit line in color
     // ---------------------------------------------------------------------
+    let show_diff = matches.get_flag("show_diff");
+    let format = if show_diff {
+        "%h - %s [%cr by %an]%n"  // Add newline after each commit when showing diff
+    } else {
+        "%h - %s [%cr by %an]"
+    };
+
     let mut child = match ProcessCommand::new("git")
         .arg("-C")
         .arg(&repo_path)
@@ -170,7 +185,7 @@ fn main() {
         .arg("--all") // includes all branches
         .arg(format!("--author={}", author))
         .arg(format!("--since={}", since))
-        .arg("--pretty=format:%h - %s [%cr by %an]")
+        .arg(format!("--pretty=format:{}", format))
         .stdout(Stdio::piped())
         .spawn()
     {
@@ -201,6 +216,33 @@ fn main() {
                         relative_time.green(),
                         commit_author.magenta()
                     );
+
+                    // If show_diff is enabled, show the diff for this commit
+                    if show_diff {
+                        let diff_child = ProcessCommand::new("git")
+                            .arg("-C")
+                            .arg(&repo_path)
+                            .arg("--no-pager")
+                            .arg("show")
+                            .arg("--color=always")
+                            .arg("--stat")
+                            .arg("--patch")
+                            .arg(short_hash)
+                            .stdout(Stdio::piped())
+                            .spawn();
+
+                        if let Ok(mut diff_child) = diff_child {
+                            if let Some(diff_stdout) = diff_child.stdout.take() {
+                                let diff_reader = std::io::BufReader::new(diff_stdout);
+                                for diff_line in diff_reader.lines() {
+                                    if let Ok(diff_line) = diff_line {
+                                        println!("    {}", diff_line);
+                                    }
+                                }
+                            }
+                            println!(); // Add a blank line after each diff
+                        }
+                    }
                 } else {
                     // If something doesn't match, just print raw
                     println!("{}", line_str);
