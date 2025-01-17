@@ -2,9 +2,12 @@ use clap::{Arg, Command as ClapCommand};
 use colored::*;
 use regex::Regex;
 use std::env;
-use std::io::BufRead;
+use std::fs::File;
+use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::process::{Command as ProcessCommand, Stdio};
+mod midi;
+use midi::{CommitNote, MusicConfig, commit_to_note, generate_midi};
 
 // Tabled imports
 use tabled::{
@@ -51,6 +54,28 @@ fn main() {
                 .long("show-diff")
                 .short('d')
                 .help("Show the diff for each commit")
+                .action(clap::ArgAction::SetTrue)
+                .required(false),
+        )
+        .arg(
+            Arg::new("generate_music")
+                .long("generate-music")
+                .short('m')
+                .help("Generate MIDI music from commit history")
+                .action(clap::ArgAction::SetTrue)
+                .required(false),
+        )
+        .arg(
+            Arg::new("save_music")
+                .long("save-music")
+                .value_name("FILE")
+                .help("Save generated music to a MIDI file")
+                .required(false),
+        )
+        .arg(
+            Arg::new("play")
+                .long("play")
+                .help("Play the generated music immediately")
                 .action(clap::ArgAction::SetTrue)
                 .required(false),
         )
@@ -199,6 +224,11 @@ fn main() {
     // Regex to parse lines like: <hash> - <message> [<relative time> by <author>]
     let re = Regex::new(r"^([0-9a-f]+) - (.*?) \[(.*?) by (.*?)\]$").unwrap();
 
+    let generate_music = matches.get_flag("generate_music");
+    let save_music_path = matches.get_one::<String>("save_music");
+    let mut commit_notes = Vec::new();
+
+    // Process commits
     if let Some(stdout) = child.stdout.take() {
         let reader = std::io::BufReader::new(stdout);
         for line in reader.lines() {
@@ -217,7 +247,39 @@ fn main() {
                         commit_author.magenta()
                     );
 
-                    // If show_diff is enabled, show the diff for this commit
+                    // Generate music if enabled
+                    if generate_music || save_music_path.is_some() {
+                        // Get the diff stats for the commit
+                        let diff_stats = ProcessCommand::new("git")
+                            .arg("-C")
+                            .arg(&repo_path)
+                            .arg("--no-pager")
+                            .arg("show")
+                            .arg("--numstat")
+                            .arg(short_hash)
+                            .output()
+                            .unwrap();
+
+                        if diff_stats.status.success() {
+                            let stats_output = String::from_utf8_lossy(&diff_stats.stdout);
+                            for stat_line in stats_output.lines() {
+                                let parts: Vec<&str> = stat_line.split_whitespace().collect();
+                                if parts.len() >= 3 {
+                                    if let (Ok(add), Ok(del)) = (parts[0].parse::<i32>(), parts[1].parse::<i32>()) {
+                                        let file_ext = Path::new(parts[2])
+                                            .extension()
+                                            .and_then(|s| s.to_str())
+                                            .unwrap_or("unknown");
+                                        
+                                        let note = commit_to_note(add, del, file_ext, &MusicConfig::default());
+                                        commit_notes.push(note);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Show diff if enabled
                     if show_diff {
                         let diff_child = ProcessCommand::new("git")
                             .arg("-C")
@@ -244,7 +306,6 @@ fn main() {
                         }
                     }
                 } else {
-                    // If something doesn't match, just print raw
                     println!("{}", line_str);
                 }
             }
@@ -370,4 +431,23 @@ fn main() {
     println!("{}", "====================== STATS ======================".bold());
     println!();
     println!("{table}");
+
+    // After processing all commits, generate and save/play music if requested
+    if !commit_notes.is_empty() {
+        let config = MusicConfig::default();
+        let midi_data = generate_midi(commit_notes, &config);
+
+        if let Some(path) = save_music_path {
+            let mut file = File::create(path).unwrap();
+            midi_data.write_std(&mut file).unwrap();
+            println!("\n{}", format!("🎵 MIDI file saved to: {}", path).green());
+        }
+
+        if matches.get_flag("play") {
+            println!("\n{}", "🎵 Playing commit music...".green());
+            if let Err(e) = play_midi(&midi_data) {
+                eprintln!("{}", format!("Error playing MIDI: {}", e).red());
+            }
+        }
+    }
 }
