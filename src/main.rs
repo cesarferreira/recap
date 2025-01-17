@@ -7,7 +7,7 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::process::{Command as ProcessCommand, Stdio};
 mod midi;
-use midi::{CommitNote, MusicConfig, commit_to_note, generate_midi};
+use midi::{CommitNote, MusicConfig, commit_to_note, generate_midi, play_midi};
 
 // Tabled imports
 use tabled::{
@@ -438,7 +438,20 @@ fn main() {
         let midi_data = generate_midi(commit_notes, &config);
 
         if let Some(path) = save_music_path {
-            let mut file = File::create(path).unwrap();
+            // Create parent directories if they don't exist
+            if let Some(parent) = Path::new(path).parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    eprintln!("{}", format!("Error creating directories: {}", e).red());
+                    std::process::exit(1);
+                }
+            }
+            let mut file = match File::create(path) {
+                Ok(f) => f,
+                Err(e) => {
+                    eprintln!("{}", format!("Error creating file: {}", e).red());
+                    std::process::exit(1);
+                }
+            };
             midi_data.write_std(&mut file).unwrap();
             println!("\n{}", format!("🎵 MIDI file saved to: {}", path).green());
         }

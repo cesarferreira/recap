@@ -7,6 +7,7 @@ use rodio::{OutputStream, Sink};
 use std::fs::File;
 use std::io::Write;
 use tempfile::NamedTempFile;
+use std::process::Command;
 
 const BASE_NOTE: u8 = 60; // Middle C
 const VELOCITY: u8 = 100;
@@ -79,28 +80,46 @@ pub fn generate_midi(notes: Vec<CommitNote>, config: &MusicConfig) -> Smf {
 
     let mut track = Track::new();
     
-    // Set tempo
+    // Set tempo (slower tempo for better clarity)
     track.push(TrackEvent {
         delta: 0.into(),
-        kind: TrackEventKind::Meta(MetaMessage::Tempo((60_000_000 / config.tempo).into())),
+        kind: TrackEventKind::Meta(MetaMessage::Tempo((60_000_000 / 80).into())), // 80 BPM
     });
 
-    let mut time = 0u32;
+    // Set instruments for each channel using basic GM instruments
+    for channel in 0..4 {
+        track.push(TrackEvent {
+            delta: 0.into(),
+            kind: TrackEventKind::Midi {
+                channel: channel.into(),
+                message: MidiMessage::ProgramChange {
+                    program: match channel {
+                        0 => 0.into(),   // Piano (GM instrument 1)
+                        1 => 1.into(),   // Bright Piano (GM instrument 2)
+                        2 => 40.into(),  // Violin (GM instrument 41)
+                        _ => 0.into(),   // Piano for others
+                    },
+                },
+            },
+        });
+    }
+
+    let mut current_time = 0u32;
     for note in notes {
         // Note on
         track.push(TrackEvent {
-            delta: time.into(),
+            delta: 120.into(), // Add a small pause between notes
             kind: TrackEventKind::Midi {
                 channel: note.channel.into(),
                 message: MidiMessage::NoteOn {
                     key: note.note.into(),
-                    vel: note.velocity.into(),
+                    vel: (127u8).into(), // Full velocity for clearer sound
                 },
             },
         });
 
-        // Calculate duration in MIDI ticks (assuming 480 ticks per quarter note)
-        let duration_ticks = (note.duration.as_secs_f32() * 480.0) as u32;
+        // Hold the note longer for better audibility
+        let duration_ticks = 480u32; // One quarter note duration
 
         // Note off
         track.push(TrackEvent {
@@ -114,12 +133,12 @@ pub fn generate_midi(notes: Vec<CommitNote>, config: &MusicConfig) -> Smf {
             },
         });
 
-        time = duration_ticks;
+        current_time += duration_ticks + 120;
     }
 
     // End of track
     track.push(TrackEvent {
-        delta: 0.into(),
+        delta: 480.into(), // Add a full note pause at the end
         kind: TrackEventKind::Meta(MetaMessage::EndOfTrack),
     });
 
@@ -128,18 +147,22 @@ pub fn generate_midi(notes: Vec<CommitNote>, config: &MusicConfig) -> Smf {
 }
 
 pub fn play_midi(midi_data: &Smf) -> Result<(), Box<dyn std::error::Error>> {
-    // Create a temporary file to store MIDI data
-    let mut temp_file = NamedTempFile::new()?;
-    midi_data.write_std(&mut temp_file)?;
+    // Create a temporary file with .mid extension
+    let temp_file = NamedTempFile::new()?.into_temp_path();
+    let temp_path = temp_file.with_extension("mid");
+    let mut file = File::create(&temp_path)?;
+    midi_data.write_std(&mut file)?;
     
-    // Get output stream handle
-    let (_stream, stream_handle) = OutputStream::try_default()?;
-    let sink = Sink::try_new(&stream_handle)?;
-    
-    // Load and play the MIDI file
-    let file = std::fs::File::open(temp_file.path())?;
-    sink.append(rodio::Decoder::new(file)?);
-    
-    sink.sleep_until_end();
-    Ok(())
+    // Try timidity on all platforms
+    match Command::new("timidity").arg(&temp_path).status() {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            if cfg!(target_os = "macos") {
+                eprintln!("Error: timidity not found. Install it with: brew install timidity");
+            } else if cfg!(target_os = "linux") {
+                eprintln!("Error: timidity not found. Install it with: sudo apt-get install timidity");
+            }
+            Err(e.into())
+        }
+    }
 } 
