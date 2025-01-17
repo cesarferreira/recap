@@ -6,18 +6,27 @@ use std::io::BufRead;
 use std::path::Path;
 use std::process::{Command as ProcessCommand, Stdio};
 
+// Tabled imports
+use tabled::{
+    Table, Tabled,
+    Style, Disable,
+    Modify,
+    object::Segment,
+    Alignment
+};
+
 fn main() {
     // 1. Define the CLI with Clap
     let matches = ClapCommand::new("recap")
-        .version("1.0")
+        .version("1.2.0")
         .author("Your Name <your.email@example.com>")
-        .about("Shows your commits in color. Default is 'yesterday' or the last 24 hours.")
+        .about("Shows your commits (all branches) in color, plus a stats table.")
         .arg(
             Arg::new("author")
                 .long("author")
                 .short('a')
                 .value_name("AUTHOR")
-                .help("Author name or email to filter by. Defaults to git config user.name if not provided.")
+                .help("Author name/email to filter by. Defaults to git config user.name if not provided.")
                 .required(false),
         )
         .arg(
@@ -25,7 +34,7 @@ fn main() {
                 .long("repo-path")
                 .short('p')
                 .value_name("REPO_PATH")
-                .help("Path to the Git repository (or subfolder). Defaults to current directory if not provided.")
+                .help("Path to the Git repo (can be subfolder). Defaults to current directory if not provided.")
                 .required(false),
         )
         .arg(
@@ -139,7 +148,7 @@ fn main() {
         }
     }
 
-    // 5. Print an initial summary (in color!)
+    // 5. Print an initial summary
     println!(
         "{}",
         format!(
@@ -150,14 +159,15 @@ fn main() {
         )
     );
 
-    // 6. Prepare to run the git log command
-    // We'll capture stdout so we can parse lines for colorization
+    // ---------------------------------------------------------------------
+    // PART A: Print each commit line in color
+    // ---------------------------------------------------------------------
     let mut child = match ProcessCommand::new("git")
         .arg("-C")
         .arg(&repo_path)
         .arg("--no-pager")
         .arg("log")
-        .arg("--all")
+        .arg("--all") // includes all branches
         .arg(format!("--author={}", author))
         .arg(format!("--since={}", since))
         .arg("--pretty=format:%h - %s [%cr by %an]")
@@ -171,15 +181,13 @@ fn main() {
         }
     };
 
-    // 7. Regex to parse: <hash> - <message> [<relative time> by <author>]
+    // Regex to parse lines like: <hash> - <message> [<relative time> by <author>]
     let re = Regex::new(r"^([0-9a-f]+) - (.*?) \[(.*?) by (.*?)\]$").unwrap();
 
-    // 8. Read stdout line by line
     if let Some(stdout) = child.stdout.take() {
         let reader = std::io::BufReader::new(stdout);
         for line in reader.lines() {
             if let Ok(line_str) = line {
-                // If line matches the pattern, color each group separately
                 if let Some(caps) = re.captures(&line_str) {
                     let short_hash = caps.get(1).unwrap().as_str();
                     let commit_msg = caps.get(2).unwrap().as_str();
@@ -194,16 +202,129 @@ fn main() {
                         commit_author.magenta()
                     );
                 } else {
-                    // If for some reason the line doesn't match, just print it
+                    // If something doesn't match, just print raw
                     println!("{}", line_str);
                 }
             }
         }
     }
 
-    // 9. Wait for the child process to exit
     if let Err(e) = child.wait() {
         eprintln!("{}", format!("Error waiting for `git log` to finish: {e}").red());
         std::process::exit(1);
     }
+
+    // ---------------------------------------------------------------------
+    // PART B: Gather stats (#commits, lines added, lines deleted)
+    // ---------------------------------------------------------------------
+    let mut stats_child = match ProcessCommand::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .arg("log")
+        .arg("--all")
+        .arg(format!("--author={}", author))
+        .arg(format!("--since={}", since))
+        // We'll use a special format + numstat
+        .arg("--pretty=tformat:COMMIT")
+        .arg("--numstat")
+        .stdout(Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{}", format!("Error gathering stats with `git log`: {e}").red());
+            std::process::exit(1);
+        }
+    };
+
+    let mut commits_count = 0;
+    let mut total_additions = 0;
+    let mut total_deletions = 0;
+
+    if let Some(stdout) = stats_child.stdout.take() {
+        let reader = std::io::BufReader::new(stdout);
+        for line in reader.lines().flatten() {
+            let line_str = line.trim().to_string();
+            // "COMMIT" indicates a new commit
+            if line_str == "COMMIT" {
+                commits_count += 1;
+            } else if !line_str.is_empty() {
+                // Lines of the form "<added> <deleted> <filename>"
+                // Could be: "100 50 src/main.rs" or "-   -  some_binary"
+                let parts: Vec<&str> = line_str.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    // Attempt to parse additions/deletions
+                    let added = parts[0];
+                    let deleted = parts[1];
+
+                    // If they are "-", it's likely a binary or rename; treat them as zero.
+                    let added_num = added.parse::<i32>().unwrap_or(0);
+                    let deleted_num = deleted.parse::<i32>().unwrap_or(0);
+
+                    total_additions += added_num;
+                    total_deletions += deleted_num;
+                }
+            }
+        }
+    }
+
+    if let Err(e) = stats_child.wait() {
+        eprintln!(
+            "{}",
+            format!("Error waiting for `git log --numstat` to finish: {e}").red()
+        );
+        std::process::exit(1);
+    }
+
+    // ---------------------------------------------------------------------
+    // PART C: Print stats in a Tabled table with your color scheme
+    // ---------------------------------------------------------------------
+
+    // 1. Create a struct for tabled
+    #[derive(Tabled)]
+    struct StatsRow {
+        label: String, // String so we can apply .bold()
+        value: String,
+    }
+
+    // 2. Build a vector of rows, making left label bold
+    let stats_data = vec![
+        StatsRow {
+            label: "Commits".bold().to_string(),
+            value: commits_count
+                .to_string()
+                .yellow()
+                .bold()
+                .to_string(),
+        },
+        StatsRow {
+            label: "Lines added (+)".bold().to_string(),
+            value: total_additions
+                .to_string()
+                .green()
+                .bold()
+                .to_string(),
+        },
+        StatsRow {
+            label: "Lines deleted (-)".bold().to_string(),
+            value: total_deletions
+                .to_string()
+                .red()
+                .bold()
+                .to_string(),
+        },
+    ];
+
+    // 3. Build the table
+    let table = Table::new(stats_data)
+        // Use straight lines:
+        .with(Style::modern())
+        // Disable header row
+        .with(Disable::Row(..1))
+        // Align cells to the left
+        .with(Modify::new(Segment::all()).with(Alignment::left()));
+
+    println!();
+    println!("{}", "====================== STATS ======================".bold());
+    println!("{table}");
 }
