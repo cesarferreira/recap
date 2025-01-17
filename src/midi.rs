@@ -2,12 +2,10 @@ use midly::{
     Format, Header, MetaMessage, MidiMessage, Smf, Track, TrackEvent, TrackEventKind,
 };
 use std::time::Duration;
-use std::io::Cursor;
-use rodio::{OutputStream, Sink};
+use rodio::{OutputStream, Sink, source::{SineWave, Source}};
 use std::fs::File;
 use std::io::Write;
 use tempfile::NamedTempFile;
-use std::process::Command;
 
 const BASE_NOTE: u8 = 60; // Middle C
 const VELOCITY: u8 = 100;
@@ -83,7 +81,7 @@ pub fn generate_midi(notes: Vec<CommitNote>, config: &MusicConfig) -> Smf {
     // Set tempo (slower tempo for better clarity)
     track.push(TrackEvent {
         delta: 0.into(),
-        kind: TrackEventKind::Meta(MetaMessage::Tempo((60_000_000 / 80).into())), // 80 BPM
+        kind: TrackEventKind::Meta(MetaMessage::Tempo((60_000_000 / 100).into())), // 100 BPM
     });
 
     // Set instruments for each channel using basic GM instruments
@@ -94,10 +92,10 @@ pub fn generate_midi(notes: Vec<CommitNote>, config: &MusicConfig) -> Smf {
                 channel: channel.into(),
                 message: MidiMessage::ProgramChange {
                     program: match channel {
-                        0 => 0.into(),   // Piano (GM instrument 1)
-                        1 => 1.into(),   // Bright Piano (GM instrument 2)
-                        2 => 40.into(),  // Violin (GM instrument 41)
-                        _ => 0.into(),   // Piano for others
+                        0 => 0.into(),   // Piano
+                        1 => 25.into(),  // Steel Guitar
+                        2 => 40.into(),  // Violin
+                        _ => 19.into(),  // Church Organ
                     },
                 },
             },
@@ -108,18 +106,20 @@ pub fn generate_midi(notes: Vec<CommitNote>, config: &MusicConfig) -> Smf {
     for note in notes {
         // Note on
         track.push(TrackEvent {
-            delta: 120.into(), // Add a small pause between notes
+            delta: 60.into(), // Small pause between notes
             kind: TrackEventKind::Midi {
                 channel: note.channel.into(),
                 message: MidiMessage::NoteOn {
                     key: note.note.into(),
-                    vel: (127u8).into(), // Full velocity for clearer sound
+                    vel: (100u8).into(), // Good velocity for clear sound
                 },
             },
         });
 
-        // Hold the note longer for better audibility
-        let duration_ticks = 480u32; // One quarter note duration
+        // Calculate duration based on the commit size but ensure it's audible
+        let duration_ticks = ((note.duration.as_secs_f32() * 480.0) as u32)
+            .max(240)  // Minimum duration (half note)
+            .min(960); // Maximum duration (2 whole notes)
 
         // Note off
         track.push(TrackEvent {
@@ -133,7 +133,7 @@ pub fn generate_midi(notes: Vec<CommitNote>, config: &MusicConfig) -> Smf {
             },
         });
 
-        current_time += duration_ticks + 120;
+        current_time += duration_ticks + 60;
     }
 
     // End of track
@@ -147,22 +147,29 @@ pub fn generate_midi(notes: Vec<CommitNote>, config: &MusicConfig) -> Smf {
 }
 
 pub fn play_midi(midi_data: &Smf) -> Result<(), Box<dyn std::error::Error>> {
-    // Create a temporary file with .mid extension
-    let temp_file = NamedTempFile::new()?.into_temp_path();
-    let temp_path = temp_file.with_extension("mid");
-    let mut file = File::create(&temp_path)?;
-    midi_data.write_std(&mut file)?;
-    
-    // Try timidity on all platforms
-    match Command::new("timidity").arg(&temp_path).status() {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            if cfg!(target_os = "macos") {
-                eprintln!("Error: timidity not found. Install it with: brew install timidity");
-            } else if cfg!(target_os = "linux") {
-                eprintln!("Error: timidity not found. Install it with: sudo apt-get install timidity");
+    let (_stream, stream_handle) = OutputStream::try_default()?;
+    let sink = Sink::try_new(&stream_handle)?;
+
+    // Extract notes from MIDI data
+    for event in midi_data.tracks[0].iter() {
+        if let TrackEventKind::Midi { message, channel } = event.kind {
+            if let MidiMessage::NoteOn { key, vel } = message {
+                if vel.as_int() > 0 {
+                    // Convert MIDI note to frequency (A4 = 69 = 440Hz)
+                    let freq = 440.0 * 2.0f32.powf((key.as_int() as f32 - 69.0) / 12.0);
+                    
+                    // Create a sine wave for this note
+                    let source = SineWave::new(freq)
+                        .fade_in(Duration::from_millis(10))
+                        .amplify(0.20);
+                    
+                    sink.append(source);
+                    std::thread::sleep(Duration::from_millis(200));
+                }
             }
-            Err(e.into())
         }
     }
+
+    sink.sleep_until_end();
+    Ok(())
 } 
