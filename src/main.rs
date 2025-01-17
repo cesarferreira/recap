@@ -1,14 +1,15 @@
 use clap::{Arg, Command as ClapCommand};
+use colored::*;
 use std::env;
 use std::path::Path;
 use std::process::Command as ProcessCommand;
 
 fn main() {
     // 1. Define the CLI with Clap
-    let matches = ClapCommand::new("standup-butler")
+    let matches = ClapCommand::new("recap")
         .version("1.0")
         .author("Your Name <your.email@example.com>")
-        .about("Shows commits from a specified author (or your Git config) in a Git repo, within a given time range.")
+        .about("Shows your commits (yesterday or any timeframe). Think of it as your standup buddy.")
         .arg(
             Arg::new("author")
                 .long("author")
@@ -50,7 +51,7 @@ fn main() {
             match env::current_dir() {
                 Ok(dir) => dir.display().to_string(),
                 Err(e) => {
-                    eprintln!("Error getting current directory: {e}");
+                    eprintln!("{}", format!("Error getting current directory: {e}").red());
                     std::process::exit(1);
                 }
             }
@@ -73,17 +74,17 @@ fn main() {
                     if o.status.success() {
                         let name = String::from_utf8_lossy(&o.stdout).trim().to_string();
                         if name.is_empty() {
-                            eprintln!("No author specified and user.name is empty in git config.");
+                            eprintln!("{}", "No author specified and user.name is empty in git config.".red());
                             std::process::exit(1);
                         }
                         name
                     } else {
-                        eprintln!("No author specified and failed to get user.name from git config.");
+                        eprintln!("{}", "No author specified and failed to get user.name from git config.".red());
                         std::process::exit(1);
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to run `git config user.name`: {e}");
+                    eprintln!("{}", format!("Failed to run `git config user.name`: {e}").red());
                     std::process::exit(1);
                 }
             }
@@ -92,7 +93,7 @@ fn main() {
 
     // 3. Validate that repo_path is a directory
     if !Path::new(&repo_path).is_dir() {
-        eprintln!("Error: '{}' is not a valid directory.", repo_path);
+        eprintln!("{}", format!("Error: '{repo_path}' is not a valid directory.").red());
         std::process::exit(1);
     }
 
@@ -107,27 +108,29 @@ fn main() {
     match inside_repo_check {
         Ok(output) => {
             if !output.status.success() {
-                eprintln!("Error: '{}' is not a Git repository.", repo_path);
+                eprintln!("{}", format!("Error: '{repo_path}' is not a Git repository.").red());
                 std::process::exit(1);
             } else {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if stdout.trim() != "true" {
-                    eprintln!("Error: '{}' is not a valid Git repository.", repo_path);
+                    eprintln!("{}", format!("Error: '{repo_path}' is not a valid Git repository.").red());
                     std::process::exit(1);
                 }
             }
         }
         Err(e) => {
-            eprintln!("Error running `git rev-parse`: {e}");
+            eprintln!("{}", format!("Error running `git rev-parse`: {e}").red());
             std::process::exit(1);
         }
     }
 
-    // 5. Display what we're doing
-    println!(
-        "Showing commits since '{}' by author '{}' in repo: {}\n",
-        since, author, repo_path
-    );
+    // 5. Display what we're doing (in color!)
+    println!("{}", format!(
+        "👀  Looking for commits since '{}' by author '{}' in '{}':\n",
+        since.yellow(),
+        author.green(),
+        repo_path.blue()
+    ));
 
     // 6. Run the git log command
     let git_log_output = ProcessCommand::new("git")
@@ -146,21 +149,23 @@ fn main() {
             if output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 if stdout.trim().is_empty() {
-                    println!(
+                    println!("{}", format!(
                         "No commits found matching author '{}' since '{}'.",
                         author, since
-                    );
+                    ).red());
                 } else {
+                    // For extra flair, we could parse each line and color it individually,
+                    // but here's a simple approach that prints them all in default color:
                     println!("{}", stdout);
                 }
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                eprintln!("git log failed: {}", stderr);
+                eprintln!("{}", format!("git log failed: {stderr}").red());
                 std::process::exit(1);
             }
         }
         Err(e) => {
-            eprintln!("Error running `git log`: {e}");
+            eprintln!("{}", format!("Error running `git log`: {e}").red());
             std::process::exit(1);
         }
     }
