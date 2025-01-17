@@ -157,6 +157,7 @@ fn main() {
         .arg(&repo_path)
         .arg("--no-pager")
         .arg("log")
+        .arg("--all")
         .arg(format!("--author={}", author))
         .arg(format!("--since={}", since))
         .arg("--pretty=format:%h - %s [%cr by %an]")
