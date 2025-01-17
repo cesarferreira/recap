@@ -248,7 +248,7 @@ fn main() {
                     );
 
                     // Generate music if enabled
-                    if generate_music || save_music_path.is_some() {
+                    if generate_music || save_music_path.is_some() || matches.get_flag("play") {
                         // Get the diff stats for the commit
                         let diff_stats = ProcessCommand::new("git")
                             .arg("-C")
@@ -437,6 +437,15 @@ fn main() {
         let config = MusicConfig::default();
         let midi_data = generate_midi(commit_notes, &config);
 
+        // Handle playback first if requested
+        if matches.get_flag("play") {
+            println!("\n{}", "🎵 Playing commit music...".green());
+            if let Err(e) = play_midi(&midi_data) {
+                eprintln!("{}", format!("Error playing MIDI: {}", e).red());
+            }
+        }
+
+        // Then save to specified file if requested
         if let Some(path) = save_music_path {
             // Create parent directories if they don't exist
             if let Some(parent) = Path::new(path).parent() {
@@ -454,13 +463,6 @@ fn main() {
             };
             midi_data.write_std(&mut file).unwrap();
             println!("\n{}", format!("🎵 MIDI file saved to: {}", path).green());
-        }
-
-        if matches.get_flag("play") {
-            println!("\n{}", "🎵 Playing commit music...".green());
-            if let Err(e) = play_midi(&midi_data) {
-                eprintln!("{}", format!("Error playing MIDI: {}", e).red());
-            }
         }
     }
 }
