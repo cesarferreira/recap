@@ -85,7 +85,7 @@ pub struct MidiWithNotes {
     pub notes: Vec<CommitNote>,
 }
 
-pub fn generate_midi(notes: Vec<CommitNote>, config: &MusicConfig) -> MidiWithNotes {
+pub fn generate_midi(notes: Vec<CommitNote>) -> MidiWithNotes {
     let mut smf = Smf::new(Header::new(
         Format::SingleTrack,
         midly::Timing::Metrical(480.into()),

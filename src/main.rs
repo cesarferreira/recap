@@ -86,7 +86,7 @@ fn main() {
     // Handle music generation if requested
     if !commit_notes.is_empty() {
         let music_config = MusicConfig::default();
-        let midi_with_notes = generate_midi(commit_notes, &music_config);
+        let midi_with_notes = generate_midi(commit_notes);
 
         // Handle playback first if requested
         if config.play_music {
