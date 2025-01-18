@@ -271,7 +271,10 @@ fn main() {
                                             .and_then(|s| s.to_str())
                                             .unwrap_or("unknown");
                                         
-                                        let note = commit_to_note(add, del, file_ext, &MusicConfig::default());
+                                        let mut note = commit_to_note(add, del, file_ext, &MusicConfig::default());
+                                        note.commit_hash = short_hash.to_string();
+                                        note.commit_msg = commit_msg.to_string();
+                                        note.file_path = parts[2].to_string();
                                         commit_notes.push(note);
                                     }
                                 }
@@ -435,12 +438,12 @@ fn main() {
     // After processing all commits, generate and save/play music if requested
     if !commit_notes.is_empty() {
         let config = MusicConfig::default();
-        let midi_data = generate_midi(commit_notes, &config);
+        let midi_with_notes = generate_midi(commit_notes, &config);
 
         // Handle playback first if requested
         if matches.get_flag("play") {
             println!("\n{}", "🎵 Playing commit music...".green());
-            if let Err(e) = play_midi(&midi_data) {
+            if let Err(e) = play_midi(&midi_with_notes) {
                 eprintln!("{}", format!("Error playing MIDI: {}", e).red());
             }
         }
@@ -461,7 +464,7 @@ fn main() {
                     std::process::exit(1);
                 }
             };
-            midi_data.write_std(&mut file).unwrap();
+            midi_with_notes.midi_data.write_std(&mut file).unwrap();
             println!("\n{}", format!("🎵 MIDI file saved to: {}", path).green());
         }
     }

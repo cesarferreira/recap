@@ -6,6 +6,7 @@ use rodio::{OutputStream, Sink, source::{SineWave, Source}};
 use std::fs::File;
 use std::io::Write;
 use tempfile::NamedTempFile;
+use colored::*;
 
 const BASE_NOTE: u8 = 60; // Middle C
 const VELOCITY: u8 = 100;
@@ -15,6 +16,11 @@ pub struct CommitNote {
     pub duration: Duration,
     pub velocity: u8,
     pub channel: u8,
+    pub commit_hash: String,
+    pub commit_msg: String,
+    pub file_path: String,
+    pub additions: i32,
+    pub deletions: i32,
 }
 
 pub struct MusicConfig {
@@ -67,10 +73,20 @@ pub fn commit_to_note(
         duration,
         velocity: config.velocity,
         channel,
+        commit_hash: String::new(),
+        commit_msg: String::new(),
+        file_path: String::new(),
+        additions,
+        deletions,
     }
 }
 
-pub fn generate_midi(notes: Vec<CommitNote>, config: &MusicConfig) -> Smf {
+pub struct MidiWithNotes {
+    pub midi_data: Smf<'static>,
+    pub notes: Vec<CommitNote>,
+}
+
+pub fn generate_midi(notes: Vec<CommitNote>, config: &MusicConfig) -> MidiWithNotes {
     let mut smf = Smf::new(Header::new(
         Format::SingleTrack,
         midly::Timing::Metrical(480.into()),
@@ -103,7 +119,7 @@ pub fn generate_midi(notes: Vec<CommitNote>, config: &MusicConfig) -> Smf {
     }
 
     let mut current_time = 0u32;
-    for note in notes {
+    for note in &notes {
         // Note on
         track.push(TrackEvent {
             delta: 60.into(), // Small pause between notes
@@ -143,10 +159,13 @@ pub fn generate_midi(notes: Vec<CommitNote>, config: &MusicConfig) -> Smf {
     });
 
     smf.tracks.push(track);
-    smf
+    MidiWithNotes {
+        midi_data: smf,
+        notes,
+    }
 }
 
-pub fn play_midi(midi_data: &Smf) -> Result<(), Box<dyn std::error::Error>> {
+pub fn play_midi(midi_with_notes: &MidiWithNotes) -> Result<(), Box<dyn std::error::Error>> {
     let (_stream, stream_handle) = OutputStream::try_default()?;
     let sink = Sink::try_new(&stream_handle)?;
 
@@ -154,14 +173,15 @@ pub fn play_midi(midi_data: &Smf) -> Result<(), Box<dyn std::error::Error>> {
     let temp_file = NamedTempFile::new()?.into_temp_path();
     let temp_path = temp_file.with_extension("mid");
     let mut file = File::create(&temp_path)?;
-    midi_data.write_std(&mut file)?;
+    midi_with_notes.midi_data.write_std(&mut file)?;
 
     // Save the file for external playback
     println!("\n🎵 MIDI file saved temporarily. For better playback, use an external MIDI player.");
     println!("File location: {}", temp_path.display());
 
-    // Basic audio preview
-    for event in midi_data.tracks[0].iter() {
+    // Basic audio preview with commit information
+    let mut note_index = 0;
+    for event in midi_with_notes.midi_data.tracks[0].iter() {
         if let TrackEventKind::Midi { message, channel } = event.kind {
             if let MidiMessage::NoteOn { key, vel } = message {
                 if vel.as_int() > 0 {
@@ -175,6 +195,22 @@ pub fn play_midi(midi_data: &Smf) -> Result<(), Box<dyn std::error::Error>> {
                         .fade_in(Duration::from_millis(10));
                     
                     sink.append(source);
+
+                    // Display commit information
+                    if note_index < midi_with_notes.notes.len() {
+                        let note = &midi_with_notes.notes[note_index];
+                        println!("🎵 {} - {} ({})", 
+                            note.commit_hash.yellow().bold(),
+                            note.commit_msg.cyan(),
+                            format!("+{} -{} {}", 
+                                note.additions.to_string().green(), 
+                                note.deletions.to_string().red(), 
+                                note.file_path.blue()
+                            )
+                        );
+                        note_index += 1;
+                    }
+
                     std::thread::sleep(Duration::from_millis(150));
                 }
             }
