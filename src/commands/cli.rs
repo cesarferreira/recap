@@ -8,6 +8,7 @@ pub struct CliConfig {
     pub generate_music: bool,
     pub save_music_path: Option<String>,
     pub play_music: bool,
+    pub who_knows_path: Option<String>,
 }
 
 pub fn parse_cli_args() -> CliConfig {
@@ -15,6 +16,16 @@ pub fn parse_cli_args() -> CliConfig {
         .version("1.2.0")
         .author("Your Name <your.email@example.com>")
         .about("Shows your commits (all branches) in color, plus a stats table.")
+        .subcommand(
+            ClapCommand::new("who-knows")
+                .about("Shows who has the most expertise with a file or directory")
+                .arg(
+                    Arg::new("path")
+                        .help("Path to the file or directory to analyze")
+                        .required(true)
+                        .index(1),
+                ),
+        )
         .arg(
             Arg::new("author")
                 .long("author")
@@ -72,6 +83,12 @@ pub fn parse_cli_args() -> CliConfig {
         )
         .get_matches();
 
+    let who_knows_path = if let Some(who_knows_matches) = matches.subcommand_matches("who-knows") {
+        who_knows_matches.get_one::<String>("path").map(|s| s.to_string())
+    } else {
+        None
+    };
+
     CliConfig {
         since: matches
             .get_one::<String>("since")
@@ -90,6 +107,7 @@ pub fn parse_cli_args() -> CliConfig {
         generate_music: matches.get_flag("generate_music"),
         save_music_path: matches.get_one::<String>("save_music").map(|s| s.to_string()),
         play_music: matches.get_flag("play"),
+        who_knows_path,
     }
 }
 

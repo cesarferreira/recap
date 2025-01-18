@@ -6,6 +6,7 @@ mod commands;
 mod git;
 mod ui;
 mod music;
+mod who_knows;
 
 use commands::parse_cli_args;
 use music::{MusicConfig, commit_to_note, generate_midi, play_midi};
@@ -13,6 +14,14 @@ use music::{MusicConfig, commit_to_note, generate_midi, play_midi};
 fn main() {
     // Parse command line arguments
     let config = parse_cli_args();
+
+    if let Some(path) = config.who_knows_path {
+        match who_knows::analyze_file_expertise(&path) {
+            Ok(stats) => who_knows::display_expertise(&path, stats),
+            Err(e) => eprintln!("Error analyzing file expertise: {}", e),
+        }
+        return;
+    }
 
     // Validate repository
     if let Err(e) = git::validate_repo(&config.repo_path) {
