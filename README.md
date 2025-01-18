@@ -6,13 +6,25 @@ Recap is a command-line tool that shows your Git commits across all branches wit
 
 ## ✨ Features
 
+### 📊 Core Features
 - 🎨 Colorful and easy-to-read commit history
-- 📊 Commit statistics table
+- 📈 Commit statistics table
 - 🌳 Shows commits from all branches
 - 👥 Filter by author
 - 🔍 Optional diff viewing
 - ⏰ Flexible time range filtering
-- 🎵 Musical visualization of commit history
+
+### 🔥 Code Analysis
+- 📍 Identify code hotspots and high-churn files
+- 👨‍💻 Find file experts with "who knows" analysis
+- 📊 Contributor statistics and suggestions
+- ⚠️ Technical debt indicators
+
+### 🎵 Musical Features
+- 🎼 Musical visualization of commit history
+- 🎹 MIDI generation from commits
+- 🔊 Live playback support
+- 💾 Save musical output to files
 
 ## 🚀 Installation
 
@@ -27,17 +39,7 @@ Basic usage (shows your commits from the last 24 hours):
 recap
 ```
 
-### 🎯 Options
-
-- `-a, --author <AUTHOR>` - Filter by author name/email (defaults to git config user.name)
-- `-p, --repo-path <PATH>` - Path to Git repository (defaults to current directory)
-- `-s, --since <TIME>` - How far back to look (defaults to "24 hours ago")
-- `-d, --show-diff` - Show the diff for each commit
-- `-m, --generate-music` - Generate MIDI music from commit history
-- `--save-music <FILE>` - Save generated music to a MIDI file
-- `--play` - Play the generated music immediately
-
-### 📝 Examples
+### 🎯 Core Commands
 
 Show commits from the last week:
 ```bash
@@ -54,7 +56,52 @@ View commits in a different repository:
 recap --repo-path /path/to/repo --since "yesterday"
 ```
 
-## 🎵 Musical Visualization
+### 🔥 Code Analysis Commands
+
+Analyze code hotspots in the entire repository:
+```bash
+recap hotspots
+```
+
+Analyze hotspots in a specific directory/file:
+```bash
+recap hotspots path/to/analyze
+```
+
+Find who knows a specific file or directory best:
+```bash
+recap who-knows path/to/file
+```
+
+### 🎵 Musical Commands
+
+Generate and play commit history as music:
+```bash
+recap --generate-music --play
+```
+
+Save the musical representation to a file:
+```bash
+recap --generate-music --save-music output.midi
+```
+
+### 📝 Available Options
+
+Core Options:
+- `-a, --author <AUTHOR>` - Filter by author name/email (defaults to git config user.name)
+- `-p, --repo-path <PATH>` - Path to Git repository (defaults to current directory)
+- `-s, --since <TIME>` - How far back to look (defaults to "24 hours ago")
+- `-d, --show-diff` - Show the diff for each commit
+
+Hotspots Options:
+- `--since <TIME>` - How far back to analyze (e.g. '2 weeks ago', 'all' for entire history)
+
+Music Options:
+- `-m, --generate-music` - Generate MIDI music from commit history
+- `--save-music <FILE>` - Save generated music to a MIDI file
+- `--play` - Play the generated music immediately
+
+## 🎵 Musical Visualization Details
 
 Recap can generate MIDI output that represents your commit history as musical notes:
 
@@ -62,16 +109,6 @@ Recap can generate MIDI output that represents your commit history as musical no
 - Deletions are represented as descending notes
 - Different file changes are played with different instruments
 - Commit size affects the volume of the notes
-
-To generate and play the music immediately:
-```bash
-recap --generate-music --play
-```
-
-To save the music to a MIDI file:
-```bash
-recap --generate-music --save-music output.midi
-```
 
 ## 🛠️ Building from Source
 
