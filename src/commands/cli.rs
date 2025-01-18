@@ -10,6 +10,7 @@ pub struct CliConfig {
     pub play_music: bool,
     pub who_knows_path: Option<String>,
     pub hotspots_path: Option<String>,
+    pub is_hotspots_command: bool,
 }
 
 pub fn parse_cli_args() -> CliConfig {
@@ -109,11 +110,10 @@ pub fn parse_cli_args() -> CliConfig {
         None
     };
 
-    let hotspots_path = if let Some(hotspots_matches) = matches.subcommand_matches("hotspots") {
-        hotspots_matches.get_one::<String>("path").map(|s| s.to_string())
-    } else {
-        None
-    };
+    let hotspots_matches = matches.subcommand_matches("hotspots");
+    let hotspots_path = hotspots_matches
+        .and_then(|m| m.get_one::<String>("path").map(|s| s.to_string()));
+    let is_hotspots_command = hotspots_matches.is_some();
 
     let since = if let Some(hotspots_matches) = matches.subcommand_matches("hotspots") {
         hotspots_matches.get_one::<String>("since").unwrap().to_string()
@@ -125,7 +125,7 @@ pub fn parse_cli_args() -> CliConfig {
     };
 
     CliConfig {
-        since: since,
+        since,
         repo_path: matches.get_one::<String>("repo_path")
             .map(|s| s.to_string())
             .unwrap_or_else(|| std::env::current_dir()
@@ -141,6 +141,7 @@ pub fn parse_cli_args() -> CliConfig {
         play_music: matches.get_flag("play"),
         who_knows_path,
         hotspots_path,
+        is_hotspots_command,
     }
 }
 

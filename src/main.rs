@@ -16,8 +16,9 @@ fn main() {
     // Parse command line arguments
     let config = parse_cli_args();
 
-    if let Some(path) = config.hotspots_path.clone() {
-        let analyzer = match hotspots::HotspotAnalyzer::new(&config.repo_path, Some(path)) {
+    // Check if hotspots command was used (with or without path)
+    if config.is_hotspots_command {
+        let analyzer = match hotspots::HotspotAnalyzer::new(&config.repo_path, config.hotspots_path) {
             Ok(analyzer) => analyzer,
             Err(e) => {
                 eprintln!("Error initializing hotspot analyzer: {}", e);
