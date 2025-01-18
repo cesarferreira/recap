@@ -9,6 +9,7 @@ pub struct CliConfig {
     pub save_music_path: Option<String>,
     pub play_music: bool,
     pub who_knows_path: Option<String>,
+    pub hotspots_path: Option<String>,
 }
 
 pub fn parse_cli_args() -> CliConfig {
@@ -24,6 +25,25 @@ pub fn parse_cli_args() -> CliConfig {
                         .help("Path to the file or directory to analyze")
                         .required(true)
                         .index(1),
+                ),
+        )
+        .subcommand(
+            ClapCommand::new("hotspots")
+                .about("Analyze code churn and identify hotspots in the codebase")
+                .arg(
+                    Arg::new("path")
+                        .help("Path to analyze (defaults to entire repo)")
+                        .required(false)
+                        .index(1),
+                )
+                .arg(
+                    Arg::new("since")
+                        .long("since")
+                        .short('s')
+                        .value_name("SINCE")
+                        .help("How far back to analyze (e.g. '2 weeks ago', 'all' for entire history)")
+                        .default_value("all")
+                        .required(false),
                 ),
         )
         .arg(
@@ -89,11 +109,23 @@ pub fn parse_cli_args() -> CliConfig {
         None
     };
 
-    CliConfig {
-        since: matches
+    let hotspots_path = if let Some(hotspots_matches) = matches.subcommand_matches("hotspots") {
+        hotspots_matches.get_one::<String>("path").map(|s| s.to_string())
+    } else {
+        None
+    };
+
+    let since = if let Some(hotspots_matches) = matches.subcommand_matches("hotspots") {
+        hotspots_matches.get_one::<String>("since").unwrap().to_string()
+    } else {
+        matches
             .get_one::<String>("since")
             .unwrap_or(&"24 hours ago".to_string())
-            .clone(),
+            .clone()
+    };
+
+    CliConfig {
+        since: since,
         repo_path: matches.get_one::<String>("repo_path")
             .map(|s| s.to_string())
             .unwrap_or_else(|| std::env::current_dir()
@@ -108,6 +140,7 @@ pub fn parse_cli_args() -> CliConfig {
         save_music_path: matches.get_one::<String>("save_music").map(|s| s.to_string()),
         play_music: matches.get_flag("play"),
         who_knows_path,
+        hotspots_path,
     }
 }
 

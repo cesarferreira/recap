@@ -13,3 +13,4 @@ rodio = "0.17.3"
 symphonia = { version = "0.5.3", features = ["mp3"] }
 tempfile = "3.10.1"
 chrono = "0.4"
+git2 = "0.18.1"

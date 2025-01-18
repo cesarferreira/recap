@@ -7,6 +7,7 @@ mod git;
 mod ui;
 mod music;
 mod who_knows;
+mod hotspots;
 
 use commands::parse_cli_args;
 use music::{MusicConfig, commit_to_note, generate_midi, play_midi};
@@ -14,6 +15,27 @@ use music::{MusicConfig, commit_to_note, generate_midi, play_midi};
 fn main() {
     // Parse command line arguments
     let config = parse_cli_args();
+
+    if let Some(path) = config.hotspots_path.clone() {
+        let analyzer = match hotspots::HotspotAnalyzer::new(&config.repo_path, Some(path)) {
+            Ok(analyzer) => analyzer,
+            Err(e) => {
+                eprintln!("Error initializing hotspot analyzer: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        match analyzer.analyze(&config.since) {
+            Ok(hotspots) => {
+                print!("{}", hotspots::format_hotspot_report(&hotspots, &config.since));
+            }
+            Err(e) => {
+                eprintln!("Error analyzing hotspots: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
 
     if let Some(path) = config.who_knows_path {
         match who_knows::analyze_file_expertise(&path) {
