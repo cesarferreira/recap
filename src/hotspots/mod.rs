@@ -1,7 +1,11 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
+use std::io::BufRead;
 use git2::{Repository, Commit, ObjectType, Time};
 use chrono::{DateTime, Utc};
+use colored::*;
+use indicatif::{ProgressBar, ProgressStyle};
 
 #[derive(Debug)]
 pub struct FileHotspot {
@@ -35,28 +39,6 @@ impl HotspotAnalyzer {
 
         eprintln!("Analyzing repository at: {}", repo_root);
 
-        // Build git log command with numstat to get file changes
-        let mut cmd = std::process::Command::new("git");
-        cmd.current_dir(&repo_root)
-            .arg("log")
-            .arg("--no-merges")     // Exclude merge commits
-            .arg("--format=%H%n%at%n%aN%x00") // Custom format with NUL separator
-            .arg("--numstat")        // Get number of added/deleted lines
-            .arg("--no-renames");    // Don't follow renames to keep it simple
-
-        // Add since filter if specified
-        if since != "all" {
-            cmd.arg(format!("--since={}", since));
-        }
-
-        // Add path filter if specified
-        if let Some(ref filter) = self.path_filter {
-            cmd.arg("--").arg(filter);
-        }
-
-        let output = cmd.output().expect("Failed to execute git command");
-        let output_str = String::from_utf8_lossy(&output.stdout);
-        
         // Get list of files that currently exist using git ls-files
         let mut existing_files = std::collections::HashSet::new();
         let mut ls_cmd = std::process::Command::new("git");
@@ -78,54 +60,98 @@ impl HotspotAnalyzer {
 
         eprintln!("Found {} files in current tree", existing_files.len());
 
-        let mut commit_count = 0;
-        let mut lines = output_str.lines().peekable();
+        // First, count total commits
+        let mut count_cmd = std::process::Command::new("git");
+        count_cmd.current_dir(&repo_root)
+            .arg("rev-list")
+            .arg("--count")
+            .arg("HEAD");
 
-        while let Some(hash) = lines.next() {
+        if since != "all" {
+            count_cmd.arg(format!("--since={}", since));
+        }
+        if let Some(ref filter) = self.path_filter {
+            count_cmd.arg("--").arg(filter);
+        }
+
+        let total_commits = String::from_utf8_lossy(&count_cmd.output().expect("Failed to count commits").stdout)
+            .trim()
+            .parse::<u64>()
+            .unwrap_or(0);
+
+        // Setup progress bar
+        let progress_bar = ProgressBar::new(total_commits);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} commits ({per_sec})")
+                .unwrap()
+                .progress_chars("#>-")
+        );
+        progress_bar.enable_steady_tick(Duration::from_millis(100));
+
+        // Build git log command with numstat to get file changes
+        let mut cmd = std::process::Command::new("git");
+        cmd.current_dir(&repo_root)
+            .arg("log")
+            .arg("--no-merges")
+            .arg("--format=%H%n%at%n%aN%x00")
+            .arg("--numstat")
+            .arg("--no-renames")
+            .stdout(std::process::Stdio::piped());
+
+        if since != "all" {
+            cmd.arg(format!("--since={}", since));
+        }
+        if let Some(ref filter) = self.path_filter {
+            cmd.arg("--").arg(filter);
+        }
+
+        let mut child = cmd.spawn().expect("Failed to spawn git command");
+        let stdout = child.stdout.take().expect("Failed to open stdout");
+        let reader = std::io::BufReader::new(stdout);
+        let mut lines = reader.lines().peekable();
+
+        let mut commit_count = 0;
+        let mut current_hash = String::new();
+        let mut current_time = 0;
+        let mut current_author = String::new();
+
+        while let Some(line_result) = lines.next() {
+            let line = line_result.expect("Failed to read line");
+            
             // Skip empty lines
-            if hash.trim().is_empty() {
+            if line.trim().is_empty() {
                 continue;
             }
 
-            commit_count += 1;
-            if commit_count % 100 == 0 {
-                eprintln!("Processed {} commits...", commit_count);
+            if line.len() == 40 { // Git hash
+                commit_count += 1;
+                progress_bar.set_position(commit_count);
+                current_hash = line;
+                
+                if let Some(Ok(timestamp)) = lines.next() {
+                    current_time = timestamp.parse().unwrap_or(0);
+                }
+                if let Some(Ok(author)) = lines.next() {
+                    current_author = author;
+                }
+                continue;
             }
 
-            // Parse commit metadata
-            let timestamp = lines.next()
-                .and_then(|t| t.parse::<i64>().ok())
-                .unwrap_or(0);
-            let author = lines.next().unwrap_or("unknown").to_string();
-            let commit_time = DateTime::<Utc>::from_timestamp(timestamp, 0)
-                .expect("Invalid timestamp");
-
-            // Skip the NUL separator if present
-            if let Some(line) = lines.next() {
-                if !line.is_empty() {
-                    // Parse as a stat line since it's not empty
-                    if let Some((file_path, additions, deletions)) = parse_stat_line(line) {
-                        process_file_change(&mut hotspots, &existing_files, file_path, commit_time, &author);
-                    }
-                }
-            }
-
-            // Process the stat lines until we hit an empty line or the next commit hash
-            while let Some(line) = lines.peek() {
-                if line.trim().is_empty() || line.len() == 40 { // Git hash is 40 chars
-                    break;
-                }
-                if let Some((file_path, additions, deletions)) = parse_stat_line(lines.next().unwrap()) {
-                    process_file_change(&mut hotspots, &existing_files, file_path, commit_time, &author);
-                }
+            // Parse stat line
+            if let Some((file_path, _, _)) = parse_stat_line(&line) {
+                let commit_time = DateTime::<Utc>::from_timestamp(current_time, 0)
+                    .expect("Invalid timestamp");
+                process_file_change(&mut hotspots, &existing_files, file_path, commit_time, &current_author);
             }
         }
+
+        progress_bar.finish_with_message("Analysis complete");
 
         let mut result: Vec<FileHotspot> = hotspots.into_values().collect();
         result.sort_by(|a, b| b.commit_count.cmp(&a.commit_count));
         
-        eprintln!("Analyzed {} commits", commit_count);
-        eprintln!("Found {} files with changes", result.len());
+        eprintln!("\nFound {} files with changes", result.len());
         Ok(result)
     }
 }
@@ -171,29 +197,43 @@ fn process_file_change(
 }
 
 pub fn format_hotspot_report(hotspots: &[FileHotspot], since: &str) -> String {
-    let mut output = String::from("High Churn Files:\n\n");
+    let mut output = String::from("High Churn Files:\n\n".bold().to_string());
 
     for (i, hotspot) in hotspots.iter().enumerate().take(10) {
+        // File path with index
         output.push_str(&format!(
             "{}. {}\n",
-            i + 1,
-            hotspot.path
+            (i + 1).to_string().blue(),
+            hotspot.path.green()
         ));
+
+        // Commit info with count in yellow
         let commit_info = if since == "all" {
-            format!("   - Commits: {}\n", hotspot.commit_count)
+            format!("   - Commits: {}\n", hotspot.commit_count.to_string().yellow())
         } else {
-            format!("   - Commits: {} since {}\n", hotspot.commit_count, since)
+            format!("   - Commits: {} since {}\n", 
+                hotspot.commit_count.to_string().yellow(),
+                since.blue()
+            )
         };
         output.push_str(&commit_info);
-        output.push_str(&format!("   - Contributors: {}\n", hotspot.contributor_count));
+
+        // Contributors count in cyan
+        output.push_str(&format!(
+            "   - Contributors: {}\n", 
+            hotspot.contributor_count.to_string().cyan()
+        ));
         
-        // Add suggestions based on metrics
+        // Suggestions in different colors based on type
         if hotspot.commit_count > 20 && hotspot.contributor_count > 4 {
-            output.push_str("   - Suggestion: Consider refactoring or adding more tests\n");
+            output.push_str(&"   - Suggestion: ".dimmed().to_string());
+            output.push_str(&"Consider refactoring or adding more tests\n".red().to_string());
         } else if hotspot.contributor_count > 6 {
-            output.push_str("   - Suggestion: Consider assigning a code owner\n");
+            output.push_str(&"   - Suggestion: ".dimmed().to_string());
+            output.push_str(&"Consider assigning a code owner\n".yellow().to_string());
         } else if hotspot.commit_count > 15 {
-            output.push_str("   - Suggestion: Review for potential technical debt\n");
+            output.push_str(&"   - Suggestion: ".dimmed().to_string());
+            output.push_str(&"Review for potential technical debt\n".magenta().to_string());
         }
         output.push('\n');
     }
