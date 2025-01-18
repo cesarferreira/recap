@@ -21,133 +21,152 @@ impl HotspotAnalyzer {
     pub fn new(repo_path: &str, path_filter: Option<String>) -> Result<Self, git2::Error> {
         let path = Path::new(repo_path);
         let repo = Repository::discover(path)?;
-        
-        // Convert path_filter to absolute path if it exists
-        let absolute_path_filter = path_filter.map(|p| {
-            let filter_path = Path::new(&p);
-            if filter_path.is_absolute() {
-                p
-            } else {
-                path.join(filter_path)
-                    .to_string_lossy()
-                    .into_owned()
-            }
-        });
-
-        Ok(Self { repo, path_filter: absolute_path_filter })
+        Ok(Self { repo, path_filter })
     }
 
     pub fn analyze(&self, since: &str) -> Result<Vec<FileHotspot>, git2::Error> {
         let mut hotspots: HashMap<String, FileHotspot> = HashMap::new();
-        let head = self.repo.head()?;
-        let obj = head.resolve()?.peel(ObjectType::Commit)?;
-        let head_commit = obj.into_commit().expect("Could not find commit");
-
+        
         // Get repository root path
         let repo_root = self.repo.workdir()
             .expect("Repository has no working directory")
             .to_string_lossy()
             .into_owned();
 
-        // Parse the since parameter
-        let since_time = if since == "all" {
-            None
-        } else {
-            let output = std::process::Command::new("git")
-                .arg("rev-parse")
-                .arg(format!("--since={}", since))
-                .output()
-                .expect("Failed to execute git command");
+        eprintln!("Analyzing repository at: {}", repo_root);
 
-            if output.status.success() {
-                Some(DateTime::<Utc>::from_timestamp(
-                    std::str::from_utf8(&output.stdout)
-                        .unwrap()
-                        .trim()
-                        .parse()
-                        .unwrap_or(0),
-                    0,
-                ).expect("Invalid timestamp"))
-            } else {
-                None
+        // Build git log command with numstat to get file changes
+        let mut cmd = std::process::Command::new("git");
+        cmd.current_dir(&repo_root)
+            .arg("log")
+            .arg("--no-merges")     // Exclude merge commits
+            .arg("--format=%H%n%at%n%aN%x00") // Custom format with NUL separator
+            .arg("--numstat")        // Get number of added/deleted lines
+            .arg("--no-renames");    // Don't follow renames to keep it simple
+
+        // Add since filter if specified
+        if since != "all" {
+            cmd.arg(format!("--since={}", since));
+        }
+
+        // Add path filter if specified
+        if let Some(ref filter) = self.path_filter {
+            cmd.arg("--").arg(filter);
+        }
+
+        let output = cmd.output().expect("Failed to execute git command");
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        
+        // Get list of files that currently exist using git ls-files
+        let mut existing_files = std::collections::HashSet::new();
+        let mut ls_cmd = std::process::Command::new("git");
+        ls_cmd.current_dir(&repo_root)
+            .arg("ls-files");
+        
+        if let Some(ref filter) = self.path_filter {
+            ls_cmd.arg(filter);
+        }
+
+        let ls_output = ls_cmd.output().expect("Failed to execute git ls-files");
+        let ls_output_str = String::from_utf8_lossy(&ls_output.stdout);
+        
+        for file in ls_output_str.lines() {
+            if !file.trim().is_empty() {
+                existing_files.insert(file.to_string());
             }
-        };
+        }
 
-        self.traverse_commits(&head_commit, since_time, &mut hotspots, &repo_root)?;
+        eprintln!("Found {} files in current tree", existing_files.len());
+
+        let mut commit_count = 0;
+        let mut lines = output_str.lines().peekable();
+
+        while let Some(hash) = lines.next() {
+            // Skip empty lines
+            if hash.trim().is_empty() {
+                continue;
+            }
+
+            commit_count += 1;
+            if commit_count % 100 == 0 {
+                eprintln!("Processed {} commits...", commit_count);
+            }
+
+            // Parse commit metadata
+            let timestamp = lines.next()
+                .and_then(|t| t.parse::<i64>().ok())
+                .unwrap_or(0);
+            let author = lines.next().unwrap_or("unknown").to_string();
+            let commit_time = DateTime::<Utc>::from_timestamp(timestamp, 0)
+                .expect("Invalid timestamp");
+
+            // Skip the NUL separator if present
+            if let Some(line) = lines.next() {
+                if !line.is_empty() {
+                    // Parse as a stat line since it's not empty
+                    if let Some((file_path, additions, deletions)) = parse_stat_line(line) {
+                        process_file_change(&mut hotspots, &existing_files, file_path, commit_time, &author);
+                    }
+                }
+            }
+
+            // Process the stat lines until we hit an empty line or the next commit hash
+            while let Some(line) = lines.peek() {
+                if line.trim().is_empty() || line.len() == 40 { // Git hash is 40 chars
+                    break;
+                }
+                if let Some((file_path, additions, deletions)) = parse_stat_line(lines.next().unwrap()) {
+                    process_file_change(&mut hotspots, &existing_files, file_path, commit_time, &author);
+                }
+            }
+        }
 
         let mut result: Vec<FileHotspot> = hotspots.into_values().collect();
         result.sort_by(|a, b| b.commit_count.cmp(&a.commit_count));
+        
+        eprintln!("Analyzed {} commits", commit_count);
+        eprintln!("Found {} files with changes", result.len());
         Ok(result)
     }
+}
 
-    fn traverse_commits(
-        &self,
-        commit: &Commit,
-        since_time: Option<DateTime<Utc>>,
-        hotspots: &mut HashMap<String, FileHotspot>,
-        repo_root: &str,
-    ) -> Result<(), git2::Error> {
-        let commit_time = DateTime::<Utc>::from_timestamp(commit.time().seconds(), 0)
-            .expect("Invalid timestamp");
+fn parse_stat_line(line: &str) -> Option<(&str, u32, u32)> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() != 3 {
+        return None;
+    }
 
-        if let Some(cutoff) = since_time {
-            if commit_time < cutoff {
-                return Ok(());
-            }
-        }
+    let additions = parts[0].parse().unwrap_or(0);
+    let deletions = parts[1].parse().unwrap_or(0);
+    Some((parts[2], additions, deletions))
+}
 
-        // Process the commit's changes
-        if let Ok(Some(parent)) = commit.parent(0).map(Some).or::<git2::Error>(Ok(None)) {
-            let tree = commit.tree()?;
-            let parent_tree = parent.tree()?;
-            let diff = self.repo.diff_tree_to_tree(
-                Some(&parent_tree),
-                Some(&tree),
-                None,
-            )?;
+fn process_file_change(
+    hotspots: &mut HashMap<String, FileHotspot>,
+    existing_files: &std::collections::HashSet<String>,
+    file_path: &str,
+    commit_time: DateTime<Utc>,
+    author: &str,
+) {
+    // Skip if file doesn't exist anymore
+    if !existing_files.contains(file_path) {
+        return;
+    }
 
-            diff.foreach(
-                &mut |delta, _| -> bool {
-                    if let Some(path) = delta.new_file().path() {
-                        let path_str = path.to_string_lossy().into_owned();
-                        let absolute_path = Path::new(repo_root).join(&path_str);
-                        let absolute_path_str = absolute_path.to_string_lossy().into_owned();
-                        
-                        // Apply path filter if specified
-                        if let Some(ref filter) = self.path_filter {
-                            if !absolute_path_str.starts_with(filter) {
-                                return true;
-                            }
-                        }
+    let entry = hotspots.entry(file_path.to_string()).or_insert_with(|| FileHotspot {
+        path: file_path.to_string(),
+        commit_count: 0,
+        contributor_count: 0,
+        last_modified: commit_time,
+        contributors: HashMap::new(),
+    });
 
-                        let entry = hotspots.entry(path_str.clone()).or_insert_with(|| FileHotspot {
-                            path: path_str,
-                            commit_count: 0,
-                            contributor_count: 0,
-                            last_modified: commit_time,
-                            contributors: HashMap::new(),
-                        });
-
-                        entry.commit_count += 1;
-                        if let Some(author) = commit.author().name() {
-                            *entry.contributors.entry(author.to_string()).or_insert(0) += 1;
-                            entry.contributor_count = entry.contributors.len();
-                        }
-                    }
-                    true
-                },
-                None,
-                None,
-                None,
-            )?;
-        }
-
-        // Traverse parents
-        for parent in commit.parents() {
-            self.traverse_commits(&parent, since_time, hotspots, repo_root)?;
-        }
-
-        Ok(())
+    entry.commit_count += 1;
+    *entry.contributors.entry(author.to_string()).or_insert(0) += 1;
+    entry.contributor_count = entry.contributors.len();
+    
+    if commit_time > entry.last_modified {
+        entry.last_modified = commit_time;
     }
 }
 
