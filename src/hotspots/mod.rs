@@ -167,6 +167,59 @@ fn parse_stat_line(line: &str) -> Option<(&str, u32, u32)> {
     Some((parts[2], additions, deletions))
 }
 
+fn is_source_file(file_path: &str) -> bool {
+    // Files and patterns to explicitly ignore
+    const IGNORED_PATTERNS: &[&str] = &[
+        // Config files
+        "config", "conf", "cfg", "ini", "yaml", "yml", "toml", "json", "xml",
+        "properties", "env", "dist", "plist",
+
+        // Documentation
+        "md", "markdown", "txt", "rst", "adoc", "doc", "docx", "pdf",
+
+        // Data files
+        "csv", "tsv", "sql", "db", "sqlite",
+
+        // Lock files
+        "lock", "snapshot",
+
+        // Build artifacts and dependencies
+        "min.js", "min.css", "map", "bundle.js", "bundle.css",
+        "sum", "mod", "jar", "war", "ear", "class", "pyc", "pyo",
+        "o", "obj", "a", "lib", "so", "dll", "dylib",
+
+        // Images and media
+        "png", "jpg", "jpeg", "gif", "svg", "ico", "bmp", "webp",
+        "mp3", "mp4", "wav", "avi", "mov", "webm",
+        "ttf", "otf", "woff", "woff2", "eot",
+
+        // Archives
+        "zip", "tar", "gz", "rar", "7z",
+
+        // Other
+        "gitignore", "dockerignore", "editorconfig", "DS_Store",
+        "eslintrc", "prettierrc", "babelrc", "browserslistrc",
+    ];
+
+    let lower_path = file_path.to_lowercase();
+    
+    // Check if it matches any ignored pattern
+    for pattern in IGNORED_PATTERNS {
+        if lower_path.ends_with(pattern) {
+            return false;
+        }
+    }
+
+    // If the file has an extension and it's not in the ignore list, consider it a source file
+    if let Some(ext) = Path::new(file_path).extension() {
+        if let Some(_) = ext.to_str() {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn process_file_change(
     hotspots: &mut HashMap<String, FileHotspot>,
     existing_files: &std::collections::HashSet<String>,
@@ -174,8 +227,8 @@ fn process_file_change(
     commit_time: DateTime<Utc>,
     author: &str,
 ) {
-    // Skip if file doesn't exist anymore
-    if !existing_files.contains(file_path) {
+    // Skip if file doesn't exist anymore or isn't a source file
+    if !existing_files.contains(file_path) || !is_source_file(file_path) {
         return;
     }
 
