@@ -2,16 +2,17 @@ use colored::*;
 use std::fs::File;
 use std::path::Path;
 
-mod cli;
+mod commands;
 mod git;
-mod display;
-mod midi;
+mod ui;
+mod music;
 
-use midi::{CommitNote, MusicConfig, commit_to_note, generate_midi, play_midi};
+use commands::parse_cli_args;
+use music::{CommitNote, MusicConfig, commit_to_note, generate_midi, play_midi};
 
 fn main() {
     // Parse command line arguments
-    let config = cli::parse_cli_args();
+    let config = parse_cli_args();
 
     // Validate repository
     if let Err(e) = git::validate_repo(&config.repo_path) {
@@ -35,11 +36,11 @@ fn main() {
     let mut commit_notes = Vec::new();
 
     for commit in &commits {
-        display::print_commit(commit);
+        ui::print_commit(commit);
 
         if config.show_diff {
             if let Some(diff) = git::get_commit_diff(&config.repo_path, &commit.hash) {
-                display::print_diff(&diff);
+                ui::print_diff(&diff);
             }
         }
 
@@ -80,7 +81,7 @@ fn main() {
 
     // Get and display stats
     let stats = git::get_stats(&config.repo_path, &config.author, &config.since);
-    display::print_stats(&stats);
+    ui::print_stats(&stats);
 
     // Handle music generation if requested
     if !commit_notes.is_empty() {
