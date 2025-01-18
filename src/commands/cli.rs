@@ -1,5 +1,4 @@
 use clap::{Arg, Command as ClapCommand};
-use std::path::Path;
 
 pub struct CliConfig {
     pub author: String,

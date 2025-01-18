@@ -4,7 +4,6 @@ use midly::{
 use std::time::Duration;
 use rodio::{OutputStream, Sink, source::{SineWave, Source}};
 use std::fs::File;
-use std::io::Write;
 use tempfile::NamedTempFile;
 use colored::*;
 

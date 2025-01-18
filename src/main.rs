@@ -8,7 +8,7 @@ mod ui;
 mod music;
 
 use commands::parse_cli_args;
-use music::{CommitNote, MusicConfig, commit_to_note, generate_midi, play_midi};
+use music::{MusicConfig, commit_to_note, generate_midi, play_midi};
 
 fn main() {
     // Parse command line arguments

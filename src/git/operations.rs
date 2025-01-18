@@ -1,4 +1,3 @@
-use colored::*;
 use regex::Regex;
 use std::io::{self, BufRead};
 use std::path::Path;
