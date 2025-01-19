@@ -23,8 +23,12 @@ pub struct Cli {
     pub play: bool,
 
     /// Save generated music to file
-    #[arg(short = 's', long)]
+    #[arg(long = "save-music")]
     pub save_music_path: Option<String>,
+
+    /// Since date (e.g., "1 week ago", "2023-01-01")
+    #[arg(short, long, default_value = "24 hours ago")]
+    pub since: String,
 }
 
 #[derive(Subcommand)]
@@ -75,9 +79,9 @@ pub fn parse_cli_args() -> Config {
 
     let (is_hotspots_command, hotspots_path, who_knows_path, bus_factor_path, bus_factor_threshold, since) = match cli.command {
         Some(Commands::Hotspots { path, since }) => (true, path, None, None, None, since),
-        Some(Commands::WhoKnows { path }) => (false, None, Some(path), None, None, "24 hours ago".to_string()),
-        Some(Commands::BusFactor { path, threshold }) => (false, None, None, Some(path), Some(threshold), "24 hours ago".to_string()),
-        None => (false, None, None, None, None, "24 hours ago".to_string()),
+        Some(Commands::WhoKnows { path }) => (false, None, Some(path), None, None, cli.since),
+        Some(Commands::BusFactor { path, threshold }) => (false, None, None, Some(path), Some(threshold), cli.since),
+        None => (false, None, None, None, None, cli.since),
     };
 
     Config {
