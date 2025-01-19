@@ -17,6 +17,7 @@ Recap is a command-line tool that shows your Git commits across all branches wit
 ### 🔥 Code Analysis
 - 📍 Identify code hotspots and high-churn files
 - 👨‍💻 Find file experts with "who knows" analysis
+- 🚌 Detect bus factor risks and knowledge silos
 - 📊 Contributor statistics and suggestions
 - ⚠️ Technical debt indicators
 
@@ -60,18 +61,40 @@ recap --repo-path /path/to/repo --since "yesterday"
 
 Analyze code hotspots in the entire repository:
 ```bash
-recap hotspots
-```
-
-Analyze hotspots in a specific directory/file:
-```bash
-recap hotspots path/to/analyze
+$ recap hotspots
+🔥 Hot Files (last month):
+  1. src/api/users.rs (25 changes)
+  2. src/db/schema.rs (18 changes)
 ```
 
 Find who knows a specific file or directory best:
 ```bash
-recap who-knows path/to/file
+$ recap who-knows src/main.rs
+📚 File Expertise:
+  - Alice (65% - primary maintainer)
+  - Bob (25%)
+  - Charlie (10%)
 ```
+
+Identify bus factor risks in the codebase:
+```bash
+$ recap bus-factor src/
+High Risk (Bus Factor 1):
+  - src/core/auth.rs (95% owned by Alice, 203 lines)
+  - src/utils/crypto.rs (90% owned by Bob, 156 lines)
+```
+
+Options for bus factor analysis:
+```bash
+recap bus-factor              # analyze entire repo
+recap bus-factor src/         # analyze specific directory
+recap bus-factor --threshold 75   # custom ownership threshold (default: 80%)
+```
+
+This helps identify potential knowledge silos where:
+- Files are predominantly owned by a single person
+- There's risk if that person becomes unavailable
+- Code might benefit from more shared ownership
 
 ### 🎵 Musical Commands
 
@@ -95,6 +118,9 @@ Core Options:
 
 Hotspots Options:
 - `--since <TIME>` - How far back to analyze (e.g. '2 weeks ago', 'all' for entire history)
+
+Bus Factor Options:
+- `--threshold <NUMBER>` - Ownership percentage threshold (default: 80)
 
 Music Options:
 - `-m, --generate-music` - Generate MIDI music from commit history
