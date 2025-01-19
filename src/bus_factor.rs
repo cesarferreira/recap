@@ -20,7 +20,11 @@ pub struct BusFactorResult {
 
 impl BusFactorAnalyzer {
     pub fn new(repo_path: &str, threshold: f64) -> Result<Self, Box<dyn Error>> {
-        let repo = Repository::open(repo_path)?;
+        // Try to find the git repository from the current path
+        let repo = match Repository::discover(repo_path) {
+            Ok(repo) => repo,
+            Err(e) => return Err(format!("Could not find git repository: {}", e).into()),
+        };
         Ok(BusFactorAnalyzer { repo, threshold })
     }
 
@@ -34,7 +38,8 @@ impl BusFactorAnalyzer {
         let target_path = if path.is_absolute() {
             path.to_path_buf()
         } else {
-            repo_path.join(path)
+            // If path is relative, make it relative to the current directory
+            std::env::current_dir()?.join(path)
         };
 
         if target_path.is_file() {
