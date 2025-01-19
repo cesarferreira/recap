@@ -14,10 +14,6 @@ pub struct Cli {
     #[arg(short, long)]
     pub author: Option<String>,
 
-    /// Since date (e.g., "1 week ago", "2023-01-01")
-    #[arg(short, long, default_value = "24 hours ago")]
-    pub since: String,
-
     /// Show diff for each commit
     #[arg(short = 'd', long)]
     pub show_diff: bool,
@@ -37,6 +33,10 @@ pub enum Commands {
     Hotspots {
         /// Optional path to analyze (defaults to entire repository)
         path: Option<String>,
+        
+        /// Since date (e.g., "1 week ago", "2023-01-01")
+        #[arg(short, long, default_value = "all")]
+        since: String,
     },
     /// Show who knows about a specific file
     WhoKnows {
@@ -73,17 +73,17 @@ pub fn parse_cli_args() -> Config {
     let cli = Cli::parse();
     let author = cli.author.unwrap_or_else(get_git_user_name);
 
-    let (is_hotspots_command, hotspots_path, who_knows_path, bus_factor_path, bus_factor_threshold) = match cli.command {
-        Some(Commands::Hotspots { path }) => (true, path, None, None, None),
-        Some(Commands::WhoKnows { path }) => (false, None, Some(path), None, None),
-        Some(Commands::BusFactor { path, threshold }) => (false, None, None, Some(path), Some(threshold)),
-        None => (false, None, None, None, None),
+    let (is_hotspots_command, hotspots_path, who_knows_path, bus_factor_path, bus_factor_threshold, since) = match cli.command {
+        Some(Commands::Hotspots { path, since }) => (true, path, None, None, None, since),
+        Some(Commands::WhoKnows { path }) => (false, None, Some(path), None, None, "24 hours ago".to_string()),
+        Some(Commands::BusFactor { path, threshold }) => (false, None, None, Some(path), Some(threshold), "24 hours ago".to_string()),
+        None => (false, None, None, None, None, "24 hours ago".to_string()),
     };
 
     Config {
         repo_path: cli.repo_path,
         author,
-        since: cli.since,
+        since,
         show_diff: cli.show_diff,
         play: cli.play,
         save_music_path: cli.save_music_path,

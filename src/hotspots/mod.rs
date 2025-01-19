@@ -25,7 +25,34 @@ impl HotspotAnalyzer {
     pub fn new(repo_path: &str, path_filter: Option<String>) -> Result<Self, git2::Error> {
         let path = Path::new(repo_path);
         let repo = Repository::discover(path)?;
-        Ok(Self { repo, path_filter })
+        
+        // Convert path_filter to be relative to repo root if provided
+        let normalized_path_filter = path_filter.map(|p| {
+            let repo_root = repo.workdir()
+                .expect("Repository has no working directory")
+                .to_string_lossy()
+                .into_owned();
+            
+            // Normalize path separators
+            let p = p.replace("\\", "/");
+            
+            // Handle absolute paths
+            let path_to_check = if Path::new(&p).is_absolute() {
+                p.clone()
+            } else {
+                format!("{}/{}", repo_root.trim_end_matches('/'), p.trim_start_matches('/'))
+            };
+
+            // Try to make it relative to repo root
+            let full_path = Path::new(&path_to_check);
+            if let Ok(relative) = full_path.strip_prefix(&repo_root) {
+                relative.to_string_lossy().into_owned().replace("\\", "/")
+            } else {
+                p
+            }
+        });
+
+        Ok(Self { repo, path_filter: normalized_path_filter })
     }
 
     pub fn analyze(&self, since: &str) -> Result<Vec<FileHotspot>, git2::Error> {
@@ -37,6 +64,53 @@ impl HotspotAnalyzer {
             .to_string_lossy()
             .into_owned();
 
+        eprintln!("Repository root: {}", repo_root);
+
+        // Get the effective path filter
+        let effective_path_filter = if let Some(ref filter) = self.path_filter {
+            // Get current working directory
+            let current_dir = std::env::current_dir()
+                .expect("Failed to get current directory")
+                .to_string_lossy()
+                .into_owned();
+            
+            
+            // Get the path relative to the repository root
+            let relative_to_repo = if let Ok(rel) = Path::new(&current_dir)
+                .strip_prefix(&repo_root)
+            {
+                let rel_str = rel.to_string_lossy().replace("\\", "/");
+                // Check if the filter path starts with any part of our current directory
+                if filter.starts_with(&rel_str) {
+                    filter.clone()
+                } else {
+                    format!("{}/{}", rel_str, filter)
+                }
+            } else {
+                filter.clone()
+            };
+            
+            eprintln!("Trying path relative to repo root: {}", relative_to_repo);
+            
+            // Check if path exists in git (not just filesystem)
+            let mut check_cmd = std::process::Command::new("git");
+            check_cmd.current_dir(&repo_root)
+                .arg("ls-files")
+                .arg("--error-unmatch")
+                .arg(&relative_to_repo)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            
+            if !check_cmd.status().map(|s| s.success()).unwrap_or(false) {
+                eprintln!("Warning: Path '{}' does not exist in git repository", relative_to_repo);
+                return Ok(Vec::new());
+            }
+            
+            Some(relative_to_repo)
+        } else {
+            None
+        };
+
         eprintln!("Analyzing repository at: {}", repo_root);
 
         // Get list of files that currently exist using git ls-files
@@ -45,8 +119,8 @@ impl HotspotAnalyzer {
         ls_cmd.current_dir(&repo_root)
             .arg("ls-files");
         
-        if let Some(ref filter) = self.path_filter {
-            ls_cmd.arg(filter);
+        if let Some(ref path) = effective_path_filter {
+            ls_cmd.arg(path);
         }
 
         let ls_output = ls_cmd.output().expect("Failed to execute git ls-files");
@@ -70,8 +144,8 @@ impl HotspotAnalyzer {
         if since != "all" {
             count_cmd.arg(format!("--since={}", since));
         }
-        if let Some(ref filter) = self.path_filter {
-            count_cmd.arg("--").arg(filter);
+        if let Some(ref path) = effective_path_filter {
+            count_cmd.arg("--").arg(path);
         }
 
         let total_commits = String::from_utf8_lossy(&count_cmd.output().expect("Failed to count commits").stdout)
@@ -97,14 +171,30 @@ impl HotspotAnalyzer {
             .arg("--format=%H%n%at%n%aN%x00")
             .arg("--numstat")
             .arg("--no-renames")
+            .arg("--full-history")
+            .arg("--all")  // Include all refs
             .stdout(std::process::Stdio::piped());
 
         if since != "all" {
             cmd.arg(format!("--since={}", since));
         }
-        if let Some(ref filter) = self.path_filter {
-            cmd.arg("--").arg(filter);
+        if let Some(ref path) = effective_path_filter {
+            cmd.arg("--");
+            // Use a wildcard to catch all files under the directory
+            if !path.contains('.') {  // If it's likely a directory
+                cmd.arg(format!("{}/**", path));
+            } else {
+                cmd.arg(path);
+            }
         }
+
+        // Debug: print the command
+        let cmd_str = format!("git log {}",
+            cmd.get_args()
+                .map(|arg| arg.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
 
         let mut child = cmd.spawn().expect("Failed to spawn git command");
         let stdout = child.stdout.take().expect("Failed to open stdout");
@@ -228,7 +318,19 @@ fn process_file_change(
     author: &str,
 ) {
     // Skip if file doesn't exist anymore or isn't a source file
-    if !existing_files.contains(file_path) || !is_source_file(file_path) {
+    if !existing_files.contains(file_path) {
+        // For directory analysis, check if the file starts with our path
+        if let Some(first) = existing_files.iter().next() {
+            let dir_prefix = Path::new(first).parent().map(|p| p.to_string_lossy().to_string());
+            if let Some(prefix) = dir_prefix {
+                if !file_path.starts_with(&prefix) {
+                    return;
+                }
+            }
+        }
+    }
+    
+    if !is_source_file(file_path) {
         return;
     }
 
@@ -250,6 +352,10 @@ fn process_file_change(
 }
 
 pub fn format_hotspot_report(hotspots: &[FileHotspot], since: &str) -> String {
+    if hotspots.is_empty() {
+        return String::new();
+    }
+
     let mut output = String::from("High Churn Files:\n\n".bold().to_string());
 
     for (i, hotspot) in hotspots.iter().enumerate().take(10) {
