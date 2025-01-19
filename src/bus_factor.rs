@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::process::Command;
 use colored::*;
-use git2::{Repository, BlameOptions};
+use git2::Repository;
 use std::error::Error;
 
 pub struct BusFactorAnalyzer {
@@ -27,7 +28,6 @@ impl BusFactorAnalyzer {
         let mut results = Vec::new();
         let path = Path::new(path);
         
-        // Get the absolute repository path
         let repo_path = self.repo.workdir()
             .ok_or("Could not get repository working directory")?;
         
@@ -80,7 +80,7 @@ impl BusFactorAnalyzer {
                             results.push(result);
                         }
                     }
-                    Err(_) => continue, // Skip files that can't be analyzed
+                    Err(_) => continue,
                 }
             } else if path.is_dir() && !path.ends_with(".git") {
                 let _ = self.analyze_directory(&path, results);
@@ -91,33 +91,70 @@ impl BusFactorAnalyzer {
     }
 
     fn analyze_file(&self, file_path: &Path) -> Result<BusFactorResult, Box<dyn Error>> {
-        let mut blame_opts = BlameOptions::new();
-        blame_opts.track_copies_same_file(true);
-        blame_opts.track_copies_same_commit_moves(true);
-
         let repo_path = self.repo.workdir()
             .ok_or("Could not get repository working directory")?;
         let relative_path = file_path.strip_prefix(repo_path)?;
         
         // Skip empty files
-        if std::fs::read_to_string(file_path)?.trim().is_empty() {
+        let content = std::fs::read_to_string(file_path)?;
+        if content.trim().is_empty() {
             return Err("Empty file".into());
         }
 
-        let blame = self.repo.blame_file(relative_path, Some(&mut blame_opts))?;
+        // Run git blame command
+        let output = Command::new("git")
+            .current_dir(repo_path)
+            .arg("blame")
+            .arg("--line-porcelain") // Get detailed info including author name
+            .arg(relative_path)
+            .output()?;
+
+        if !output.status.success() {
+            return Err("Failed to run git blame".into());
+        }
+
+        let blame_output = String::from_utf8(output.stdout)?;
         let mut author_lines: HashMap<String, usize> = HashMap::new();
-        let total_lines = blame.len();
+        let mut current_author = String::new();
+        let mut total_lines = 0;
+        let mut in_multiline_comment = false;
+
+        for line in blame_output.lines() {
+            if line.starts_with("author ") {
+                current_author = line[7..].to_string();
+            } else if line.starts_with('\t') {
+                let code_line = line[1..].trim();
+                
+                // Skip empty lines
+                if code_line.is_empty() {
+                    continue;
+                }
+
+                // Handle multi-line comments
+                if code_line.starts_with("/*") {
+                    in_multiline_comment = true;
+                    continue;
+                }
+                if code_line.ends_with("*/") {
+                    in_multiline_comment = false;
+                    continue;
+                }
+                if in_multiline_comment || code_line.starts_with("*") {
+                    continue;
+                }
+
+                // Skip single-line comments
+                if code_line.starts_with("//") {
+                    continue;
+                }
+
+                total_lines += 1;
+                *author_lines.entry(current_author.clone()).or_insert(0) += 1;
+            }
+        }
 
         if total_lines == 0 {
             return Err("No lines to analyze".into());
-        }
-
-        for i in 0..total_lines {
-            if let Some(hunk) = blame.get_line(i) {
-                let signature = hunk.final_signature();
-                let author = signature.name().unwrap_or("Unknown").to_string();
-                *author_lines.entry(author).or_insert(0) += 1;
-            }
         }
 
         let (dominant_author, lines) = author_lines
@@ -145,13 +182,22 @@ pub fn format_bus_factor_report(results: &[BusFactorResult]) -> String {
 
     // Sort results by ownership percentage in descending order
     let mut sorted_results = results.to_vec();
-    sorted_results.sort_by(|a, b| b.ownership_percentage.partial_cmp(&a.ownership_percentage).unwrap());
+    sorted_results.sort_by(|a, b| {
+        // First sort by ownership percentage
+        let cmp = b.ownership_percentage.partial_cmp(&a.ownership_percentage).unwrap();
+        if cmp == std::cmp::Ordering::Equal {
+            // Then by number of lines (larger files first)
+            b.total_lines.cmp(&a.total_lines)
+        } else {
+            cmp
+        }
+    });
 
     for result in sorted_results {
         output.push_str(&format!(
             "  - {} ({}% owned by {}, {} lines)\n",
             result.path.blue(),
-            format!("{:.1}", result.ownership_percentage).red(),
+            format!("{:.0}", result.ownership_percentage).red(),
             result.dominant_author.green(),
             result.total_lines
         ));
