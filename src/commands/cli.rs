@@ -15,7 +15,7 @@ pub struct Cli {
     pub author: Option<String>,
 
     /// Since date (e.g., "1 week ago", "2023-01-01")
-    #[arg(short, long, default_value = "1 week ago")]
+    #[arg(short, long, default_value = "24 hours ago")]
     pub since: String,
 
     /// Show diff for each commit
@@ -76,7 +76,7 @@ pub struct Config {
 
 pub fn parse_cli_args() -> Config {
     let cli = Cli::parse();
-    let author = cli.author.unwrap_or_else(|| String::from(""));
+    let author = cli.author.unwrap_or_else(get_git_user_name);
 
     let (is_hotspots_command, hotspots_path, who_knows_path, bus_factor_path, bus_factor_threshold) = match cli.command {
         Some(Commands::Hotspots { path }) => (true, path, None, None, None),
