@@ -22,13 +22,9 @@ pub struct Cli {
     #[arg(short = 'd', long)]
     pub show_diff: bool,
 
-    /// Generate music from commits
-    #[arg(short = 'm', long)]
-    pub generate_music: bool,
-
-    /// Play generated music
+    /// Play commit history as music
     #[arg(short = 'p', long)]
-    pub play_music: bool,
+    pub play: bool,
 
     /// Save generated music to file
     #[arg(short = 's', long)]
@@ -64,8 +60,7 @@ pub struct Config {
     pub author: String,
     pub since: String,
     pub show_diff: bool,
-    pub generate_music: bool,
-    pub play_music: bool,
+    pub play: bool,
     pub save_music_path: Option<String>,
     pub is_hotspots_command: bool,
     pub hotspots_path: Option<String>,
@@ -90,8 +85,7 @@ pub fn parse_cli_args() -> Config {
         author,
         since: cli.since,
         show_diff: cli.show_diff,
-        generate_music: cli.generate_music,
-        play_music: cli.play_music,
+        play: cli.play,
         save_music_path: cli.save_music_path,
         is_hotspots_command,
         hotspots_path,

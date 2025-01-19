@@ -101,7 +101,7 @@ fn main() {
         }
 
         // Generate music notes if needed
-        if config.generate_music || config.save_music_path.is_some() || config.play_music {
+        if config.play || config.save_music_path.is_some() {
             let output = std::process::Command::new("git")
                 .arg("-C")
                 .arg(&config.repo_path)
@@ -145,7 +145,7 @@ fn main() {
         let midi_with_notes = generate_midi(commit_notes);
 
         // Handle playback first if requested
-        if config.play_music {
+        if config.play {
             println!("\n{}", "🎵 Playing commit music...".green());
             if let Err(e) = play_midi(&midi_with_notes) {
                 eprintln!("{}", format!("Error playing MIDI: {}", e).red());

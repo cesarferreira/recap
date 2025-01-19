@@ -96,16 +96,21 @@ This helps identify potential knowledge silos where:
 - There's risk if that person becomes unavailable
 - Code might benefit from more shared ownership
 
-### 🎵 Musical Commands
+### �� Musical Commands
 
-Generate and play commit history as music:
+Play commit history as music:
 ```bash
-recap --generate-music --play
+recap --play
 ```
 
 Save the musical representation to a file:
 ```bash
-recap --generate-music --save-music output.midi
+recap --save-music output.midi
+```
+
+Play and save at the same time:
+```bash
+recap --play --save-music output.midi
 ```
 
 ### 📝 Available Options
@@ -123,9 +128,8 @@ Bus Factor Options:
 - `--threshold <NUMBER>` - Ownership percentage threshold (default: 80)
 
 Music Options:
-- `-m, --generate-music` - Generate MIDI music from commit history
-- `--save-music <FILE>` - Save generated music to a MIDI file
-- `--play` - Play the generated music immediately
+- `-p, --play` - Play the commit history as music
+- `-s, --save-music <FILE>` - Save musical representation to a MIDI file
 
 ## 🎵 Musical Visualization Details
 
