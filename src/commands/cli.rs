@@ -1,147 +1,103 @@
-use clap::{Arg, Command as ClapCommand};
+use clap::{Arg, Command as ClapCommand, Parser, Subcommand};
 
-pub struct CliConfig {
-    pub author: String,
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Commands>,
+
+    /// Repository path
+    #[arg(short, long, default_value = ".")]
     pub repo_path: String,
+
+    /// Author name
+    #[arg(short, long)]
+    pub author: Option<String>,
+
+    /// Since date (e.g., "1 week ago", "2023-01-01")
+    #[arg(short, long, default_value = "1 week ago")]
+    pub since: String,
+
+    /// Show diff for each commit
+    #[arg(short = 'd', long)]
+    pub show_diff: bool,
+
+    /// Generate music from commits
+    #[arg(short = 'm', long)]
+    pub generate_music: bool,
+
+    /// Play generated music
+    #[arg(short = 'p', long)]
+    pub play_music: bool,
+
+    /// Save generated music to file
+    #[arg(short = 's', long)]
+    pub save_music_path: Option<String>,
+}
+
+#[derive(Subcommand)]
+pub enum Commands {
+    /// Analyze code hotspots
+    Hotspots {
+        /// Optional path to analyze (defaults to entire repository)
+        path: Option<String>,
+    },
+    /// Show who knows about a specific file
+    WhoKnows {
+        /// Path to the file to analyze
+        path: String,
+    },
+    /// Analyze bus factor risks
+    BusFactor {
+        /// Path to analyze (defaults to current directory)
+        #[arg(default_value = ".")]
+        path: String,
+        /// Ownership percentage threshold (default: 80)
+        #[arg(short, long, default_value = "80.0")]
+        threshold: f64,
+    },
+}
+
+#[derive(Debug)]
+pub struct Config {
+    pub repo_path: String,
+    pub author: String,
     pub since: String,
     pub show_diff: bool,
     pub generate_music: bool,
-    pub save_music_path: Option<String>,
     pub play_music: bool,
-    pub who_knows_path: Option<String>,
-    pub hotspots_path: Option<String>,
+    pub save_music_path: Option<String>,
     pub is_hotspots_command: bool,
+    pub hotspots_path: Option<String>,
+    pub who_knows_path: Option<String>,
+    pub bus_factor_path: Option<String>,
+    pub bus_factor_threshold: Option<f64>,
 }
 
-pub fn parse_cli_args() -> CliConfig {
-    let matches = ClapCommand::new("recap")
-        .version("1.2.0")
-        .author("Your Name <your.email@example.com>")
-        .about("Shows your commits (all branches) in color, plus a stats table.")
-        .subcommand(
-            ClapCommand::new("who-knows")
-                .about("Shows who has the most expertise with a file or directory")
-                .arg(
-                    Arg::new("path")
-                        .help("Path to the file or directory to analyze")
-                        .required(true)
-                        .index(1),
-                ),
-        )
-        .subcommand(
-            ClapCommand::new("hotspots")
-                .about("Analyze code churn and identify hotspots in the codebase")
-                .arg(
-                    Arg::new("path")
-                        .help("Path to analyze (defaults to entire repo)")
-                        .required(false)
-                        .index(1),
-                )
-                .arg(
-                    Arg::new("since")
-                        .long("since")
-                        .short('s')
-                        .value_name("SINCE")
-                        .help("How far back to analyze (e.g. '2 weeks ago', 'all' for entire history)")
-                        .default_value("all")
-                        .required(false),
-                ),
-        )
-        .arg(
-            Arg::new("author")
-                .long("author")
-                .short('a')
-                .value_name("AUTHOR")
-                .help("Author name/email to filter by. Defaults to git config user.name if not provided.")
-                .required(false),
-        )
-        .arg(
-            Arg::new("repo_path")
-                .long("repo-path")
-                .short('p')
-                .value_name("REPO_PATH")
-                .help("Path to the Git repo (can be subfolder). Defaults to current directory if not provided.")
-                .required(false),
-        )
-        .arg(
-            Arg::new("since")
-                .long("since")
-                .short('s')
-                .value_name("SINCE")
-                .help("How far back to go for commits. Defaults to '24 hours ago'.")
-                .default_value("24 hours ago")
-                .required(false),
-        )
-        .arg(
-            Arg::new("show_diff")
-                .long("show-diff")
-                .short('d')
-                .help("Show the diff for each commit")
-                .action(clap::ArgAction::SetTrue)
-                .required(false),
-        )
-        .arg(
-            Arg::new("generate_music")
-                .long("generate-music")
-                .short('m')
-                .help("Generate MIDI music from commit history")
-                .action(clap::ArgAction::SetTrue)
-                .required(false),
-        )
-        .arg(
-            Arg::new("save_music")
-                .long("save-music")
-                .value_name("FILE")
-                .help("Save generated music to a MIDI file")
-                .required(false),
-        )
-        .arg(
-            Arg::new("play")
-                .long("play")
-                .help("Play the generated music immediately")
-                .action(clap::ArgAction::SetTrue)
-                .required(false),
-        )
-        .get_matches();
+pub fn parse_cli_args() -> Config {
+    let cli = Cli::parse();
+    let author = cli.author.unwrap_or_else(|| String::from(""));
 
-    let who_knows_path = if let Some(who_knows_matches) = matches.subcommand_matches("who-knows") {
-        who_knows_matches.get_one::<String>("path").map(|s| s.to_string())
-    } else {
-        None
+    let (is_hotspots_command, hotspots_path, who_knows_path, bus_factor_path, bus_factor_threshold) = match cli.command {
+        Some(Commands::Hotspots { path }) => (true, path, None, None, None),
+        Some(Commands::WhoKnows { path }) => (false, None, Some(path), None, None),
+        Some(Commands::BusFactor { path, threshold }) => (false, None, None, Some(path), Some(threshold)),
+        None => (false, None, None, None, None),
     };
 
-    let hotspots_matches = matches.subcommand_matches("hotspots");
-    let hotspots_path = hotspots_matches
-        .and_then(|m| m.get_one::<String>("path").map(|s| s.to_string()));
-    let is_hotspots_command = hotspots_matches.is_some();
-
-    let since = if let Some(hotspots_matches) = matches.subcommand_matches("hotspots") {
-        hotspots_matches.get_one::<String>("since").unwrap().to_string()
-    } else {
-        matches
-            .get_one::<String>("since")
-            .unwrap_or(&"24 hours ago".to_string())
-            .clone()
-    };
-
-    CliConfig {
-        since,
-        repo_path: matches.get_one::<String>("repo_path")
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| std::env::current_dir()
-                .expect("Failed to get current directory")
-                .display()
-                .to_string()),
-        author: matches.get_one::<String>("author")
-            .map(|s| s.to_string())
-            .unwrap_or_else(get_git_user_name),
-        show_diff: matches.get_flag("show_diff"),
-        generate_music: matches.get_flag("generate_music"),
-        save_music_path: matches.get_one::<String>("save_music").map(|s| s.to_string()),
-        play_music: matches.get_flag("play"),
-        who_knows_path,
-        hotspots_path,
+    Config {
+        repo_path: cli.repo_path,
+        author,
+        since: cli.since,
+        show_diff: cli.show_diff,
+        generate_music: cli.generate_music,
+        play_music: cli.play_music,
+        save_music_path: cli.save_music_path,
         is_hotspots_command,
+        hotspots_path,
+        who_knows_path,
+        bus_factor_path,
+        bus_factor_threshold,
     }
 }
 

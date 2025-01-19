@@ -1,10 +1,10 @@
 [package]
 name = "recap"
-version = "1.0.0"
+version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-clap = "4.3.5"
+clap = { version = "4.4.11", features = ["derive"] }
 colored = "2.0.0"
 regex = "1.9.5"
 tabled = { version = "0.8", features = ["color"] }
@@ -12,6 +12,6 @@ midly = "0.5.3"
 rodio = "0.17.3"
 symphonia = { version = "0.5.3", features = ["mp3"] }
 tempfile = "3.10.1"
-chrono = "0.4"
+chrono = "0.4.31"
 git2 = "0.18.1"
 indicatif = "0.17.7"

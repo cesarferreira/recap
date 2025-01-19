@@ -8,6 +8,7 @@ mod ui;
 mod music;
 mod who_knows;
 mod hotspots;
+mod bus_factor;
 
 use commands::parse_cli_args;
 use music::{MusicConfig, commit_to_note, generate_midi, play_midi};
@@ -42,6 +43,29 @@ fn main() {
         match who_knows::analyze_file_expertise(&path) {
             Ok(stats) => who_knows::display_expertise(&path, stats),
             Err(e) => eprintln!("Error analyzing file expertise: {}", e),
+        }
+        return;
+    }
+
+    // Handle bus factor analysis
+    if let Some(path) = config.bus_factor_path {
+        let threshold = config.bus_factor_threshold.unwrap_or(80.0);
+        let analyzer = match bus_factor::BusFactorAnalyzer::new(&config.repo_path, threshold) {
+            Ok(analyzer) => analyzer,
+            Err(e) => {
+                eprintln!("Error initializing bus factor analyzer: {}", e);
+                std::process::exit(1);
+            }
+        };
+
+        match analyzer.analyze_path(&path) {
+            Ok(results) => {
+                print!("{}", bus_factor::format_bus_factor_report(&results));
+            }
+            Err(e) => {
+                eprintln!("Error analyzing bus factor: {}", e);
+                std::process::exit(1);
+            }
         }
         return;
     }
