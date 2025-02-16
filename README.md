@@ -2,6 +2,8 @@
 
 > A beautiful Git commit history viewer with stats, colorful output, and musical visualization
 
+![demo](media/ss.png)
+
 Recap is a command-line tool that shows your Git commits across all branches with a beautiful, colorful interface. It includes commit statistics, optional diff viewing capabilities, and can generate musical representations of your commit history.
 
 ## ✨ Features
